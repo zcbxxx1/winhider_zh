@@ -95,9 +95,26 @@ cargo run
 - Alternatively you can run `build.ps1 --run` in powershell to buiild from CLI without IDE
 > To build without IDE form CLI using powershell script,navigate to `target\x86_64-pc-windows-msvc\release` and run  winhider.exe
 
+## Update `winget` Package Manifest
 
+### Update Manifest
+```bash
+wingetcreate update Bitmutex.WinHider --version x.x.x --urls "https://github.com/aamitn/winhider/releases/download/vx.x.x/WinhiderInstaller.exe" --installer-arch x64
 
-### Sign Release Binaries
+OR
+
+wingetcreate update Bitmutex.WinHider --version x.x.x --urls "https://github.com/aamitn/winhider/releases/download/vx.x.x/WinhiderInstaller.exe|x64"
+
+OR
+
+wingetcreate update Bitmutex.WinHider --version 1.0.6 --interactive
+```
+### Submit Manifest
+```bash
+wingetcreate submit ".\manifests\b\Bitmutex\Winhider\x.x.x" --token <GITHUB_TOKEN>
+```
+
+## Sign Release Binaries
 - Use `sign.cmd` to sign the release binaries and installer. This is optional but recommended for distribution. This script signs `.exe` and `.dll` files using `signtool.exe` and a `.pfx` certificate.
 - Our provided signing certificate is in `.pfx` format is at [`./Misc/WinHider.pfx`](./Misc/BitmutexCert.pfx).
 - 🔐 **Default Behavior:** Running without arguments signs all `.exe` and `.dll` files in `Build\bin\Release` using the default password
