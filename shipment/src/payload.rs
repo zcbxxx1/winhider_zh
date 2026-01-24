@@ -3,7 +3,7 @@
  * WinHider Payload DLL - Window Manipulation Library
  * =============================================================================
  *
- * Filename: lib.rs
+ * Filename: payload.rs
  * Author: bigwiz
  * Description: Dynamic link library (DLL) payload shipment for WinHider that performs
  *              low-level window manipulation operations. Injected into target
