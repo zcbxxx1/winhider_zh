@@ -1,68 +1,91 @@
-# Resolve script directory and switch to it
+# =============================================================================
+# WinHider Rust Build Script
+# =============================================================================
+#
+# DESCRIPTION:
+#   Automates the build process for the WinHider application on Windows.
+#   It ensures the necessary Rust target (x86_64-pc-windows-msvc) is installed,
+#   compiles the project, and aggregates the resulting artifacts into a 'dist' folder.
+#
+# ARGUMENTS:
+#   --nodebug    Skipps the debug build configuration. Only builds the Release version.
+#                Useful for CI/CD pipelines or final production builds to save time.
+#
+# WORKFLOW:
+#   1. Sets working directory to script location.
+#   2. Parses arguments (checks for --nodebug).
+#   3. Installs/Updates the x86_64-pc-windows-msvc Rust target.
+#   4. Iterates through configurations (Debug/Release):
+#      - Runs 'cargo build' with specific target flags.
+#      - Tracks success/failure status.
+#   5. Prints a color-coded build summary.
+#   6. Collects all build artifacts (exe/dll/pdb) into a ./dist folder.
+#
+# =============================================================================
+
 $scriptDir = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
 Set-Location $scriptDir
-
-# Ensure script stops on error
 $ErrorActionPreference = "Stop"
 
-# Check for --nodebug flag
+# ---------------------------
+# Flags
+# ---------------------------
 $skipDebug = $false
 if ($args -contains "--nodebug") {
     $skipDebug = $true
     Write-Host "`n--nodebug flag detected. Skipping Debug builds..." -ForegroundColor Yellow
 }
 
-Write-Host "Installing VSSetup module if not already present..." -ForegroundColor Cyan
-if (-not (Get-Module -ListAvailable -Name VSSetup)) {
-    Install-Module VSSetup -Scope CurrentUser -Force -AllowClobber
-}
+# ---------------------------
+# Ensure x64 target exists
+# ---------------------------
+Write-Host "Checking Rust x64 target..." -ForegroundColor Cyan
+rustup target add x86_64-pc-windows-msvc | Out-Null
 
-Import-Module VSSetup
+# ---------------------------
+# Configs
+# ---------------------------
+$configurations = if ($skipDebug) { @("release") } else { @("debug", "release") }
+$target = "x86_64-pc-windows-msvc"
 
-Write-Host "Retrieving installed Visual Studio instances..." -ForegroundColor Cyan
-$vsInstance = Get-VSSetupInstance | Sort-Object InstallationVersion -Descending | Select-Object -First 1
-
-if (-not $vsInstance) {
-    Write-Error "No Visual Studio instances found."
-    exit 1
-}
-
-$vsPath = $vsInstance.InstallationPath
-$msbuildPath = Join-Path $vsPath "MSBuild\Current\Bin\MSBuild.exe"
-
-if (-not (Test-Path $msbuildPath)) {
-    Write-Error "MSBuild not found at expected path: $msbuildPath"
-    exit 1
-}
-
-Write-Host "Using MSBuild at: $msbuildPath" -ForegroundColor Green
-
-# Define solution and build configurations
-$solution = "Winhider.sln"
-$configurations = if ($skipDebug) { @("Release") } else { @("Debug", "Release") }
-$platforms = @("x86", "x64")
-
-# Status dictionary
 $buildStatus = @{}
 
+# ---------------------------
+# Build Loop
+# ---------------------------
 foreach ($config in $configurations) {
-    foreach ($platform in $platforms) {
-        $key = "$platform-$config"
-        Write-Host "`nBuilding $solution - Configuration: $config, Platform: $platform" -ForegroundColor Cyan
-        & "$msbuildPath" $solution /p:Configuration=$config /p:Platform=$platform -m
-        if ($LASTEXITCODE -eq 0) {
-            $buildStatus[$key] = "Success"
-        } else {
-            $buildStatus[$key] = "Failed (Exit Code: $LASTEXITCODE)"
-        }
+
+    $key = "x64-$config"
+    Write-Host "`nBuilding for x64 ($target) - $config" -ForegroundColor Cyan
+
+    if ($config -eq "release") {
+        cargo build --target $target --release
+    } else {
+        cargo build --target $target
+    }
+
+    if ($LASTEXITCODE -eq 0) {
+        $buildStatus[$key] = "Success"
+    } else {
+        $buildStatus[$key] = "Failed (Exit Code: $LASTEXITCODE)"
     }
 }
 
+# ---------------------------
+# Summary
+# ---------------------------
 Write-Host "`n=== Build Summary ===" -ForegroundColor Yellow
 foreach ($entry in $buildStatus.GetEnumerator()) {
     $color = if ($entry.Value -like "Success*") { "Green" } else { "Red" }
     Write-Host ("{0,-15} : {1}" -f $entry.Key, $entry.Value) -ForegroundColor $color
 }
+
+# ---------------------------
+# Optional: Collect Artifacts
+# ---------------------------
+New-Item -ItemType Directory -Force -Path dist | Out-Null
+Copy-Item "target\$target\release\*" dist\ -Force -ErrorAction SilentlyContinue
+Copy-Item "target\$target\debug\*" dist\ -Force -ErrorAction SilentlyContinue
 
 pause
 exit 0

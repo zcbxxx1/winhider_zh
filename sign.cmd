@@ -6,6 +6,7 @@ REM Use --pass "<yourpass>" or -p "<yourpass>" for custom password - USE QUOTES
 REM Use --signinstaller or -i to sign installer(s) ONLY (Misc\output\*.exe)
 REM Use --signall or -a to sign installer(s) BOTH (Misc\output\*.exe) and (Build\bin\Release\*.exe)
 REM For no arguments it signs (Build\bin\Release\*.exe) with default password
+REM Example : sign --signall --pass mypassword
 
 REM Change to the directory where the script is located
 cd /d "%~dp0"
@@ -16,7 +17,7 @@ set "CERT=Misc\BitmutexCert.pfx"
 set "PASSWORD=mysecurepass"  REM Default password
 
 REM Directories
-set "TARGET_DIR=Build\bin\Release"
+set "TARGET_DIR=target\x86_64-pc-windows-msvc\release"
 set "INSTALLER_DIR=Misc\output"
 
 REM Flags
@@ -93,7 +94,7 @@ if "%SIGN_ALL%"=="1" (
     )
 ) else (
     echo Signing all .exe and .dll files in %TARGET_DIR%...
-    for %%F in ("%TARGET_DIR%\*.exe" "%TARGET_DIR%\*.dll") do (
+    for %%F in ("%TARGET_DIR%\*.exe" "%TARGET_DIR%\winhider_payload.dll") do (
         echo Signing %%~nxF
         "%SIGNTOOL%" sign /f "%CERT%" /p "%PASSWORD%" /t "%TIMESTAMP%" /fd sha256 "%%~F"
     )

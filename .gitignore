@@ -2,6 +2,8 @@
 !.vs/tasks.vs.json
 
 Misc/Output/
+target/
+dist/
 
 
 ### VisualStudio ###

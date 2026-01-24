@@ -1,0 +1,1 @@
+ffmpeg -i input.mp4 -filter_complex "[0:v] fps=15,scale=720:-1:flags=lanczos,split [a][b];[a] palettegen=stats_mode=diff [p];[b][p] paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle" output.gif

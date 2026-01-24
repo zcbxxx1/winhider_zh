@@ -1,0 +1,17 @@
+[package]
+name = "winhider_payload"
+version = "1.0.1"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"] # IMPORTANT: Compiles to DLL
+
+[dependencies.windows]
+version = "0.52"
+features = [
+    "Win32_Foundation",
+    "Win32_System_SystemServices",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Threading",
+    "Win32_System_LibraryLoader",
+]

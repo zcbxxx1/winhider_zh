@@ -94,9 +94,9 @@ To use this application, you can either use the installer or the portable versio
 
 ### Build The Project 
 
-- Download and extract the source from [here](https://github.com/aamitn/Winhider).
+- Download and extract the source from [here](https://github.com/aamitn/winhider).
   ```bash
-  git clone https://github.com/aamitn/Winhider
+  git clone https://github.com/aamitn/winhider
   cd Winhider
   ```
 - If you have Visual Studio Installed, open the Winhider.sln and build as per provided configs.

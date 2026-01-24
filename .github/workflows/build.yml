@@ -2,8 +2,8 @@ name: Build Release Deploy App
 
 on:
   push:
-    branches:
-      - main         # For untagged builds like "latest"
+    # branches:
+    #  - main         # For untagged builds like "latest"
     tags:
       - 'v*.*.*'         # For tagged releases like v1.0.0
   pull_request:
@@ -24,27 +24,30 @@ env:
 jobs:
   build:
     if: github.ref_type == 'tag' || github.ref == 'refs/heads/main'
-    name: Build/Release C++ project with MsBuild
+    name: Build/Release Rust project
     runs-on: windows-latest
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Add msbuild to PATH
-        uses: microsoft/setup-msbuild@v1.3.1
+      # setup-msbuild with dtolnay/rust-toolchain
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          # If you also need 32-bit support (like your old x86 build), add: i686-pc-windows-msvc
 
+      # msbuild with cargo build
       - name: Build Project
-        run: |
-          msbuild Winhider.sln /p:Configuration=Release /p:Platform=x64 -m
-          msbuild Winhider.sln /p:Configuration=Release /p:Platform=x86 -m
+        run: cargo build --release --target x86_64-pc-windows-msvc
           
       - name: Sign Release Binaries
         shell: cmd
         run: sign.cmd -p "${{ secrets.WINHIDER_CERT_SIGN_PASSWORD }}"
 
       - name: Generate zip bundle
-        run: 7z a -tzip Winhider.zip .\hide_hotkey.ahk .\Build\bin\Release\*.dll .\Build\bin\Release\*.exe
+        run: 7z a -tzip Winhider.zip .\appver.txt .\target\x86_64-pc-windows-msvc\release\*.dll .\target\x86_64-pc-windows-msvc\release\*.exe
 
       - name: Build Installer
         run: iscc .\Misc\inno.iss
