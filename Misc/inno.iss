@@ -21,7 +21,7 @@
 
 
 #define MyAppName "WinHider"
-#define MyAppVersion "1.0.5"
+#define MyAppVersion "1.0.6"
 #define MyAppPublisher "Bitmutex Technologies"
 #define MyAppURL "https://github.com/aamitn/winhider"
 
