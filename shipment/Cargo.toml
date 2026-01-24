@@ -4,6 +4,7 @@ version = "1.0.1"
 edition = "2024"
 
 [lib]
+path = "src/payload.rs"
 crate-type = ["cdylib"] # IMPORTANT: Compiles to DLL
 
 [dependencies.windows]

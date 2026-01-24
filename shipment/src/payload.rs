@@ -5,7 +5,7 @@
  *
  * Filename: lib.rs
  * Author: bigwiz
- * Description: Dynamic link library (DLL) payload for WinHider that performs
+ * Description: Dynamic link library (DLL) payload shipment for WinHider that performs
  *              low-level window manipulation operations. Injected into target
  *              processes to hide/show windows from screen capture and taskbar.
  *
