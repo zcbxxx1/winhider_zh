@@ -56,10 +56,8 @@ The tool performs dll injection with dlls containg targets for :
 
 ## 📦 Directory Structure
 
-- `Hide`, `Unhide` – Dlls for hiding/unhiding from screenshare
-- `HideTask`, `UnhideTask` –  Dlls for hiding/unhiding from taskbar/taskswitcher
-- `Injector` – CLI and DLL Injector code
-- `WinhiderGui` – WinAPI GUI code
+- `app` – Core App + Integrated Injector
+- `payload` –  DLL Creation
 - `Misc` – Miscellaneous files (icons, images, etc.)
 - `build.ps1` – PowerShell script to build the project with MSBUILD`
 - `sign.cmd` – Command-line script to sign the release binaries and installer
@@ -67,15 +65,6 @@ The tool performs dll injection with dlls containg targets for :
 ## How do I install it?
 
 To use this application, you can either use the installer or the portable version.
-
-> :
-**Binaries Legend**   
-`Winhider.exe` -> 64-bit CLI   
-`Winhider_32bit.exe` -> 32-bit CLI    
-`WinhiderGui.exe` -> 64-bit GUI  
-`WinhiderGui_32bit.exe` -> 32-bit GUI 
-`hide_hotkey.exe` -> Auto Hotkey Handler(32-bit only)
->
 
 ### Use the binary installer (recommended)
 
@@ -85,10 +74,7 @@ To use this application, you can either use the installer or the portable versio
 ### Download the portable zip with prebuilt binaries
 
 - Download and extract the generated zip bundle named [`Winhider.zip`](https://github.com/aamitn/Winhider/releases/download/latest/Winhider.zip).
-- Run `Winhider.exe`. You will now be dropped into a terminal.
-- Running the `CLI binary(Winhider.exe)`  directly drops you into interactive mode. You can type `help` for more information.
-- Running the `GUI binary(WinhiderGui.exe)`  starts the wrapper GUI head to Help->About for more information.
->You can also directly invoke it with commandline arguments. Type `Winhider --help` for argument specification.
+- Run `Winhider.exe`.
 
 
 
@@ -99,10 +85,18 @@ To use this application, you can either use the installer or the portable versio
   git clone https://github.com/aamitn/winhider
   cd Winhider
   ```
-- If you have Visual Studio Installed, open the Winhider.sln and build as per provided configs.
+- Build using CLI , Open Admin command Prompt / Terminal 
+```bash
+cargo build --release --target x86_64-pc-windows-msvc
+cd target\x86_64-pc-windows-msvc\release
+cargo run 
+```
+> after build stage, if`cargo run` gives, permission error, run the CLI as admin and rerun command.
 
-- Alternatively you can run `build.ps1` in powershell to buiild from CLI without IDE
-> To build without IDE form CLI using powershell script, make sure you have [Visual Studio Build Tools](https://aka.ms/vs/17/release/vs_BuildTools.exe) installed , you may skip this if you have entire Visual Studio Installation at system. 
+- Alternatively you can run `build.ps1 --run` in powershell to buiild from CLI without IDE
+> To build without IDE form CLI using powershell script,navigate to `target\x86_64-pc-windows-msvc\release` and run  winhider.exe
+
+
 
 ### Sign Release Binaries
 - Use `sign.cmd` to sign the release binaries and installer. This is optional but recommended for distribution. This script signs `.exe` and `.dll` files using `signtool.exe` and a `.pfx` certificate.
@@ -161,19 +155,11 @@ _Tip: you can hide the Projector window from view too._
 
 ### **▶️ Could I automatically hide windows using a hotkey?**
 
-Yes! with the installer and zip-bundles we provide 3 ways to achieve this : 
-- An Autohotkey(.ahk) script named `hide_hotkey.ahk` which could be run using Autohotkey v2+.
-- If you dont have Autohotkey installed in your system, you could also use the precompiled `hide_hotkey.exe` to use hotkey functions.
-- From GUI, just click the `Activate Hotkeys` to activate hotkeys.
+Yes! From GUI, just click the `Activate Hotkeys` to activate hotkeys, activated by default.
 	> :
 	**Hotkey Legend**  
-	`Ctrl+Shift+H` -> Hide from Screenshare   
-	`Ctrl+Shift+J` -> Unhide from Screenshare   
-	`Ctrl+Shift+K` -> Hide from Taskbar/Switcher  
-	`Ctrl+Shift+L` -> Unhide from Taskbar/Switcher  
-	`Ctrl+Shift+I` -> Show Current Window Process Info
-	`Ctrl+F10` 	   -> Show/Hide Toggle Autohotkey Script Runner System Tray Icon
-	`Ctrl+Shift+Q` -> Exit/Quit Hotkey Script
+	`Ctrl+S` -> Toggle Hide/Unhide from Screenshare   
+	`Ctrl+T` -> Toggle Hide/Unhide from Screenshare   
 	 >
 
 
