@@ -32,7 +32,7 @@ Website Repo for docs and landing : [`https://github.com/aamitn/winhider-website
 ## Glimpse of the GUI and CLI
 <p float="left">
   <img src="./Misc/ss1.png" width="400" alt="Winhider GUI" />
-  <img src="./Misc/ss2.png" width="400" alt="Winhider CLI" />
+  <img src="./Misc/ss2.png" width="250" alt="Winhider CLI" />
 </p>
 
 ## What does it do exactly?
