@@ -1,4 +1,5 @@
-# WinHider
+# WinHider™ - Rust Based App Hiding Solution
+
 <img src=".\Misc\whicon.png" alt="WinHider Logo" width="250" align="left"/>
 
 [![Build App](https://github.com/aamitn/winhider/actions/workflows/build.yml/badge.svg)](https://github.com/aamitn/winhider/actions/workflows/build.yml)
@@ -16,25 +17,31 @@
 | **Microsoft Store** | [Store Link](https://aka.ms/AAxky1o)                                                   |
 
 
+<span style="font-size:1.4em;">**`WinHider™`**</span>  (short for _`Window Hider`_) is Rust based WinAPI application that allows you to hide user defined windows from screensharing (zoom, ms-teams, gmeet etc.) and also from taskbar / taskswitcher (Alt-Tab). 
 
-**Inno Installer Silet Switches** : `/VERYSILENT` , `/CURRENTUSER`  [Required for winget/ms store publishing]
-- Example Silent Install Command:
-	```sh
-	WinhiderInstaller.exe /VERYSILENT /CURRENTUSER
-	```
+**Docs & landing page Website:** [`astro-site`](./site)
 
-**`WinHider`** (short for _`Window Hider`_) is Rust based WinAPI application that allows you to hide user defined windows from screensharing (zoom, ms-teams, gmeet etc.) and also from taskbar / taskswitcher (Alt-Tab).
-
-Docs & landing page Website: [`site`](./site)
-
+## Features
+- Hide from Screenshare/Taskbar/Taskswitcher
+- Auto-Hide List Feature
+- Comes in both GUI and Headless/CLI variants
+- Hotkeys, Multi App Actions, Auto-Updates and much more
 
 ## App Screenshots
-<p float="left">
-  <img src="./Misc/ss1.png" width="400" alt="Winhider GUI" />
-  <img src="./Misc/ss2.png" width="250" alt="Winhider CLI" />
-</p>
 
-## What does it do exactly?
+<table>
+<tr>
+<td>
+<img src="./Misc/ss1.png" width="450" alt="Winhider GUI"/>
+</td>
+<td>
+<img src="./Misc/ss2.png" width="240" alt="Winhider GUI 1"/><br/><br/>
+<img src="./Misc/ss3.png" width="360" alt="Winhider CLI"/>
+</td>
+</tr>
+</table>
+
+## What does WinHider™ do exactly?
 
 It is an aplication to hide/unhide app windows from screenshare and taskbar/taskswitcher while still be able to use and interact with the applciation in your system. 
 
@@ -98,17 +105,22 @@ cargo run
 ## Update `winget` Package Manifest
 
 ### Update Manifest
+
+#### Specify URL
 ```bash
-wingetcreate update Bitmutex.WinHider --version x.x.x --urls "https://github.com/aamitn/winhider/releases/download/vx.x.x/WinhiderInstaller.exe" --installer-arch x64
+wingetcreate update Bitmutex.WinHider --version x.x.x --urls "https://github.com/aamitn/winhider/releases/download/vx.x.x/WinhiderInstaller.exe" 
+```
 
-OR
-
+#### Specify Arch
+```bash
 wingetcreate update Bitmutex.WinHider --version x.x.x --urls "https://github.com/aamitn/winhider/releases/download/vx.x.x/WinhiderInstaller.exe|x64"
+```
 
-OR
-
+#### Interactive Mode
+```bash
 wingetcreate update Bitmutex.WinHider --version 1.0.6 --interactive
 ```
+
 ### Submit Manifest
 ```bash
 wingetcreate submit ".\manifests\b\Bitmutex\Winhider\x.x.x" --token <GITHUB_TOKEN>
@@ -131,6 +143,15 @@ wingetcreate submit ".\manifests\b\Bitmutex\Winhider\x.x.x" --token <GITHUB_TOKE
 	```
 - 🔗 **Timestamp Server:**  `http://timestamp.comodoca.com/authenticode` (Uses Comodo’s timestamp server)
 > ⚠️ **Important:** Password must be enclosed in quotes. Avoid hardcoding passwords—pass them securely using environment variables or CI/CD secrets.
+
+
+## Inno Setup Switches
+
+**Inno Installer Silent Switches** : `/VERYSILENT` , `/CURRENTUSER`  [Required for winget/ms store publishing]
+- Silent Install Command:
+	```sh
+	WinhiderInstaller.exe /VERYSILENT /CURRENTUSER
+	```
 
 ## Landing Page and Docs Site
 
@@ -172,11 +193,11 @@ _Tip: you can hide the Projector window from view too._
 ### **▶️ Could I automatically hide windows using a hotkey?**
 
 Yes! From GUI, just click the `Activate Hotkeys` to activate hotkeys, activated by default.
-	> :
-	**Hotkey Legend**  
-	`Ctrl+S` -> Toggle Hide/Unhide from Screenshare   
-	`Ctrl+T` -> Toggle Hide/Unhide from Screenshare   
-	 >
+
+> 	 **Hotkey Legend**  
+	**`Ctrl+S`** -> **Toggle Hide/Unhide from Screenshare**  
+	**`Ctrl+T`** -> **Toggle Hide/Unhide from Screenshare**   
+
 
 
 ## Contribution Guideline

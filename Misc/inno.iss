@@ -21,19 +21,29 @@
 
 
 #define MyAppName "WinHider"
-#define MyAppVersion "1.0.6"
+#define MyCLIAppName "WinHider CLI"
+#define MyAppVersion "1.0.7"
 #define MyAppPublisher "Bitmutex Technologies"
 #define MyAppURL "https://github.com/aamitn/winhider"
 
 [Code]
 
-// App Name  
+// GUI App Name  
 function MyAppExeName(Param: String): String;
 begin
   if IsWin64 then 
-    Result := 'Winhider.exe'
+    Result := 'winhider.exe'
   else 
-    Result := 'Winhider_32bit.exe';
+    Result := 'winhider_32bit.exe';
+end;
+
+// CLI App Name  
+function MyCLIAppExeName(Param: String): String;
+begin
+  if IsWin64 then 
+    Result := 'winhider-cli.exe'
+  else 
+    Result := 'winhider-cli_32bit.exe';
 end;
 
 
@@ -82,12 +92,23 @@ Source: "..\target\x86_64-pc-windows-msvc\release\winhider_payload.dll"; DestDir
 Source: "..\appver.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
+; GUI APP
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{code:MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{code:MyAppExeName}"; Tasks: desktopicon
+; CLI APP
+Name: "{autoprograms}\{#MyCLIAppName}"; Filename: "{app}\{code:MyCLIAppExeName}"
+Name: "{autodesktop}\{#MyCLIAppName}"; Filename: "{app}\{code:MyCLIAppExeName}"; Tasks: desktopicon
 
 [Run]
+;Run GUI APP
 Filename: "{app}\{code:MyAppExeName}"; \
-Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')} Application}"; \
+Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}™ GUI}"; \
+Flags: nowait postinstall skipifsilent unchecked shellexec; \
+WorkingDir: "{app}"
+
+;Run CLI APP
+Filename: "{app}\{code:MyCLIAppExeName}"; \
+Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}™ CLI}"; \
 Flags: nowait postinstall skipifsilent unchecked shellexec; \
 WorkingDir: "{app}"
 

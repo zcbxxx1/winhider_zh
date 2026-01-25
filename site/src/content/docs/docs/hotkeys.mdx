@@ -7,25 +7,15 @@ description: Learn how to use keyboard shortcuts with WinHider for quick window 
 
 WinHider provides convenient keyboard shortcuts to quickly hide and unhide windows without needing to open the application interface.
 
-## Enabling Hotkeys
-
-Hotkeys can be enabled in three ways:
-
-1. **From the GUI**: Click the "Activate Hotkeys" button in the WinHider GUI
-2. **AutoHotkey Script**: Run the included `hide_hotkey.ahk` script (requires AutoHotkey v2+)
-3. **Standalone Executable**: Run `hide_hotkey.exe` which is included in the installer and portable versions
 
 ## Default Hotkey Bindings
 
 | Hotkey | Action |
 | ------ | ------ |
-| `Ctrl+Shift+H` | Hide the active window from screen sharing |
-| `Ctrl+Shift+J` | Unhide the active window from screen sharing |
-| `Ctrl+Shift+K` | Hide the active window from taskbar/task switcher |
-| `Ctrl+Shift+L` | Unhide the active window from taskbar/task switcher |
-| `Ctrl+Shift+I` | Show information about the current window process |
-| `Ctrl+F10` | Show/hide the AutoHotkey script tray icon |
-| `Ctrl+Shift+Q` | Exit/quit the hotkey script |
+
+| `Ctrl+S` | Hide/Unhide the selected window(s) from screen sharing |
+| `Ctrl+T` | Hide/Unhide the selected window(s) from taskbar/task switcher |
+
 
 ## Using Hotkeys Effectively
 
@@ -33,30 +23,11 @@ Hotkeys can be enabled in three ways:
 2. **Quick Toggling**: Use the corresponding unhide hotkey if you need to make the window visible again
 3. **Process Info**: The `Ctrl+Shift+I` shortcut is useful for troubleshooting, as it shows details about the currently active window
 
-## Customizing Hotkeys
-
-If you want to customize the hotkey bindings:
-
-1. Locate the `hide_hotkey.ahk` script in the WinHider installation directory
-2. Open it in a text editor
-3. Modify the hotkey definitions to your preferred key combinations
-4. Save the file and run it with AutoHotkey v2+
-
-Example of customizing a hotkey in the `.ahk` script:
-
-```ahk
-; Original hotkey
-^+h::RunWait(A_ScriptDir . "\Winhider.exe hide " . "ahk_id " . WinExist("A"))
-
-; Modified to use Alt+H instead
-!h::RunWait(A_ScriptDir . "\Winhider.exe hide " . "ahk_id " . WinExist("A"))
-```
 
 ## Troubleshooting Hotkeys
 
 If hotkeys aren't working:
 
 1. **Check for Conflicts**: Other applications might be using the same keyboard shortcuts
-2. **Verify Script Running**: Look for the AutoHotkey icon in your system tray
 3. **Run as Administrator**: Some windows require elevated privileges to be modified
 4. **Check Window Compatibility**: Some applications with custom rendering may not work with WinHider

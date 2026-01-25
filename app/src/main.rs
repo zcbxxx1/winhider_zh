@@ -492,6 +492,15 @@ impl eframe::App for WinHiderApp {
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button("File", |ui| {
+                    if ui.button("Launch CLI").clicked() {
+                        if let Err(e) = launch_cli() {
+                            self.status_msg = format!("Failed to launch CLI: {}", e);
+                        } else {
+                            self.status_msg = "CLI launched successfully.".to_string();
+                        }
+                        ui.close_menu();
+                    }
+                    ui.separator();
                     if ui.button("Clear Temp Files").clicked() {
                         clean_temp_files();
                         self.status_msg = "Temporary injection files cleaned.".to_string();
@@ -1202,6 +1211,26 @@ fn clean_temp_files() {
             }
         }
     }
+}
+
+fn launch_cli() -> Result<(), String> {
+    let exe_path = std::env::current_exe()
+        .map_err(|e| format!("Failed to get current exe path: {}", e))?;
+    
+    let exe_dir = exe_path.parent()
+        .ok_or("Failed to get exe directory")?;
+    
+    let cli_path = exe_dir.join("winhider-cli.exe");
+    
+    if !cli_path.exists() {
+        return Err("winhider-cli.exe not found in the same directory".to_string());
+    }
+    
+    std::process::Command::new(&cli_path)
+        .spawn()
+        .map_err(|e| format!("Failed to launch CLI: {}", e))?;
+    
+    Ok(())
 }
 
 fn truncate_middle(text: &str, max_len: usize) -> String {
