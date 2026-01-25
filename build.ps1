@@ -5,7 +5,7 @@
 # DESCRIPTION:
 #   Automates the build process for the WinHider application on Windows.
 #   It ensures the necessary Rust target (x86_64-pc-windows-msvc) is installed,
-#   compiles the project, and aggregates the resulting artifacts into a 'dist' folder.
+#   compiles the project, and opens the build directories for easy access to artifacts.
 #
 # ARGUMENTS:
 #   --nodebug    Skipps the debug build configuration. Only builds the Release version.
@@ -19,7 +19,7 @@
 #      - Runs 'cargo build' with specific target flags.
 #      - Tracks success/failure status.
 #   5. Prints a color-coded build summary.
-#   6. Collects all build artifacts (exe/dll/pdb) into a ./dist folder.
+#   6. Opens the build directories (debug/release) in Windows Explorer.
 #
 # =============================================================================
 
@@ -81,11 +81,18 @@ foreach ($entry in $buildStatus.GetEnumerator()) {
 }
 
 # ---------------------------
-# Optional: Collect Artifacts
+# Open build directories
 # ---------------------------
-New-Item -ItemType Directory -Force -Path dist | Out-Null
-Copy-Item "target\$target\release\*" dist\ -Force -ErrorAction SilentlyContinue
-Copy-Item "target\$target\debug\*" dist\ -Force -ErrorAction SilentlyContinue
+Write-Host "`nOpening build directories..." -ForegroundColor Cyan
+foreach ($config in $configurations) {
+    $buildDir = "target\$target\$config"
+    if (Test-Path $buildDir) {
+        Write-Host "Opening $config build directory..." -ForegroundColor Green
+        explorer.exe $buildDir
+    } else {
+        Write-Host "Build directory $buildDir not found" -ForegroundColor Red
+    }
+}
 
 pause
 exit 0
