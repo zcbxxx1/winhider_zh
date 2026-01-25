@@ -16,6 +16,7 @@
 | **Github Release**  | [Installer Link](https://github.com/aamitn/winhider/releases/download/v0.8.15/WinhiderInstaller.exe) • [Zip Bundle Link](https://github.com/aamitn/winhider/releases/download/v0.8.15/Winhider.zip) |
 | **Microsoft Store** | [Store Link](https://aka.ms/AAxky1o)                                                   |
 
+**OLD Win-32 Version** : [Release](https://github.com/aamitn/winhider/releases/tag/v0.8.16) **|** [Repo](https://github.com/aamitn/winhider/tree/win32-ver)
 
 <span style="font-size:1.4em;">**`WinHider™`**</span>  (short for _`Window Hider`_) is Rust based WinAPI application that allows you to hide user defined windows from screensharing (zoom, ms-teams, gmeet etc.) and also from taskbar / taskswitcher (Alt-Tab). 
 
