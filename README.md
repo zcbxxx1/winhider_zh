@@ -67,6 +67,7 @@ The tool performs dll injection with dlls containg targets for :
 - `payload` –  DLL Creation
 - `Misc` – Miscellaneous files (icons, images, etc.)
 - `build.ps1` – PowerShell script to build the project with MSBUILD`
+- `update-winget.cmd` – Batch script to update winget package manifests
 - `sign.cmd` – Command-line script to sign the release binaries and installer
 
 ## How do I install it?
@@ -126,6 +127,31 @@ wingetcreate update Bitmutex.WinHider --version 1.0.6 --interactive
 ```bash
 wingetcreate submit ".\manifests\b\Bitmutex\Winhider\x.x.x" --token <GITHUB_TOKEN>
 ```
+
+### Alternatively, Use the provided poweershell script to update the winget package manifest:
+
+```batch
+.\publish-winget.ps1 -Version "1.0.7" -Token "GITHUB_TOKEN"
+```
+
+Or run without arguments to be prompted for the version:
+
+```batch
+.\publish-winget.ps1
+```
+
+The script will:
+- Download and setup `wingetcreate`
+- Generate the manifest for the specified version
+- Provide instructions for manual submission to winget-pkgs
+
+### Manual Submission to winget-pkgs
+
+After running the script, follow these steps to submit the manifest:
+
+1. Fork the [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) repository
+2. Copy the generated manifest files from `./manifests/b/Bitmutex/Winhider/x.x.x/` to your fork
+3. Create a pull request from your fork to `microsoft/winget-pkgs`
 
 ## Sign Release Binaries
 - Use `sign.cmd` to sign the release binaries and installer. This is optional but recommended for distribution. This script signs `.exe` and `.dll` files using `signtool.exe` and a `.pfx` certificate.
