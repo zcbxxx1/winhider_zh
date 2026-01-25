@@ -25,35 +25,62 @@ jobs:
 
       - name: Setup wingetcreate
         run: |
-          # Try to install wingetcreate via winget first
+          # Try to download wingetcreate directly from GitHub releases (more reliable)
           try {
-            winget install --id Microsoft.WingetCreate --source winget --accept-package-agreements --accept-source-agreements --silent
-            Write-Host "Wingetcreate installed via winget"
-          } catch {
-            # Fallback: download directly from GitHub releases
-            Write-Host "Winget install failed, trying direct download..."
+            Write-Host "Downloading wingetcreate from GitHub releases..."
             $latestRelease = Invoke-RestMethod -Uri "https://api.github.com/repos/microsoft/winget-create/releases/latest"
             $asset = $latestRelease.assets | Where-Object { $_.name -eq "wingetcreate.exe" } | Select-Object -First 1
             if ($asset) {
               Invoke-WebRequest -Uri $asset.browser_download_url -OutFile "wingetcreate.exe"
-              Write-Host "Wingetcreate downloaded directly"
+              Write-Host "Wingetcreate downloaded successfully"
             } else {
               throw "Could not find wingetcreate.exe in latest release"
             }
+          } catch {
+            # Fallback: try installing via winget
+            Write-Host "Direct download failed, trying winget installation..."
+            try {
+              winget install --id Microsoft.WingetCreate --source winget --accept-package-agreements --accept-source-agreements --silent
+              Write-Host "Wingetcreate installed via winget"
+
+              # Try to find wingetcreate in PATH or common locations
+              $wingetCreateCmd = Get-Command wingetcreate -ErrorAction SilentlyContinue
+              if ($wingetCreateCmd) {
+                $sourcePath = $wingetCreateCmd.Source
+                Copy-Item $sourcePath "wingetcreate.exe"
+                Write-Host "Wingetcreate copied from: $sourcePath"
+              } else {
+                # Try common winget installation paths
+                $possiblePaths = @(
+                  "$env:LOCALAPPDATA\Microsoft\WinGet\Links\wingetcreate.exe",
+                  "$env:ProgramFiles\WindowsApps\Microsoft.WingetCreate_*\wingetcreate.exe",
+                  "${env:ProgramFiles(x86)}\WindowsApps\Microsoft.WingetCreate_*\wingetcreate.exe"
+                )
+
+                $found = $false
+                foreach ($path in $possiblePaths) {
+                  if (Test-Path $path) {
+                    Copy-Item $path "wingetcreate.exe"
+                    Write-Host "Wingetcreate found and copied from: $path"
+                    $found = $true
+                    break
+                  }
+                }
+
+                if (-not $found) {
+                  throw "Could not locate wingetcreate.exe after winget installation"
+                }
+              }
+            } catch {
+              throw "Failed to install wingetcreate via both methods"
+            }
           }
 
-          # Ensure wingetcreate is executable
+          # Verify wingetcreate is available
           if (Test-Path "wingetcreate.exe") {
-            Write-Host "Wingetcreate.exe found in current directory"
+            Write-Host "Wingetcreate.exe is ready to use"
           } else {
-            # Try to find it in winget installation path
-            $wingetCreatePath = "$env:LOCALAPPDATA\Microsoft\WinGet\Links\wingetcreate.exe"
-            if (Test-Path $wingetCreatePath) {
-              Copy-Item $wingetCreatePath "wingetcreate.exe"
-              Write-Host "Wingetcreate copied from winget installation"
-            } else {
-              throw "Could not locate wingetcreate.exe"
-            }
+            throw "Wingetcreate.exe not found after installation attempts"
           }
 
       - name: Validate Version Format
