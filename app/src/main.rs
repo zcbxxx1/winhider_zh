@@ -33,6 +33,7 @@ use i18n::{Language, tr, tr_format};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::env;
 use std::ffi::c_void;
+use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -43,8 +44,9 @@ use windows::Win32::System::Diagnostics::ToolHelp::*;
 use windows::Win32::System::LibraryLoader::*;
 use windows::Win32::System::Memory::*;
 use windows::Win32::System::Threading::*;
+use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::core::s;
+use windows::core::{PCWSTR, s, w};
 
 // WGC Imports
 use windows_capture::{
@@ -64,7 +66,7 @@ use windows_capture::{
 const REPO_OWNER: &str = "aamitn";
 const REPO_NAME: &str = "winhider";
 const APP_NAME: &str = "WinHider";
-const APP_VERSION_DEFAULT: &str = "v1.0.0";
+const APP_VERSION_DEFAULT: &str = "v1.0.7-CN";
 const VERSION_FILE: &str = "appver.txt";
 const USER_AGENT: &str = "WinHider-App";
 
@@ -215,6 +217,7 @@ struct WinHiderApp {
     latest_version: Option<String>,
     auto_hide_list: Vec<String>,
     show_auto_hide_editor: bool,
+    show_reset_confirm_dialog: bool,
     new_app_input: String,
     selected_window_idx: Vec<HWND>,
 
@@ -283,6 +286,7 @@ impl WinHiderApp {
             latest_version: None,
             auto_hide_list: load_auto_hide_list(),
             show_auto_hide_editor: false,
+            show_reset_confirm_dialog: false,
             new_app_input: String::new(),
             selected_window_idx: Vec::new(),
             enable_auto_update: settings.enable_auto_update,
@@ -375,6 +379,117 @@ impl WinHiderApp {
         });
     }
 
+    fn refresh_window_list(
+        &mut self,
+        ctx: &egui::Context,
+        refresh_monitors: bool,
+        clear_selection: bool,
+    ) {
+        let new_windows = enumerate_windows(ctx);
+        let mut merged = Vec::new();
+
+        for mut window in new_windows {
+            if let Some(old) = self.windows.iter().find(|old| old.hwnd == window.hwnd) {
+                window.is_taskbar_hidden = old.is_taskbar_hidden;
+                window.is_capture_hidden = old.is_capture_hidden;
+            } else if self.should_auto_hide(&window.title) {
+                // Auto-hide new windows if they match the list.
+                window.is_taskbar_hidden = true;
+                window.is_capture_hidden = true;
+                let pid = get_pid(window.hwnd);
+                let _ = inject_payload(pid, InjectionAction::HideTaskbar);
+                let _ = inject_payload(pid, InjectionAction::HideCapture);
+            }
+
+            merged.push(window);
+        }
+
+        self.windows = merged;
+
+        if refresh_monitors {
+            self.monitors = Monitor::enumerate().unwrap_or_default();
+        }
+
+        if clear_selection {
+            self.selected_window_idx.clear();
+        } else {
+            self.selected_window_idx.retain(|selected_hwnd| {
+                self.windows
+                    .iter()
+                    .any(|window| window.hwnd == *selected_hwnd)
+            });
+        }
+
+        self.last_refresh = SystemTime::now();
+    }
+
+    fn add_auto_hide_app(&mut self, app_title: &str) -> Result<bool, String> {
+        let app_title = app_title.trim();
+        if app_title.is_empty() {
+            return Ok(false);
+        }
+
+        if auto_hide_list_contains(&self.auto_hide_list, app_title) {
+            return Ok(false);
+        }
+
+        self.auto_hide_list.push(app_title.to_string());
+        save_auto_hide_list(&self.auto_hide_list).map_err(|e| e.to_string())?;
+        Ok(true)
+    }
+
+    fn reset_hidden_states(&mut self, self_hwnd: HWND) -> (usize, usize) {
+        let mut restored_count = 0;
+        let mut error_count = 0;
+
+        if self.self_hide_capture {
+            match set_capture_self(self_hwnd, false) {
+                Ok(_) => {
+                    self.self_hide_capture = false;
+                    restored_count += 1;
+                }
+                Err(_) => error_count += 1,
+            }
+        }
+
+        if self.self_hide_taskbar {
+            match set_taskbar_visibility_external(self_hwnd, false) {
+                Ok(_) => {
+                    self.self_hide_taskbar = false;
+                    restored_count += 1;
+                }
+                Err(_) => error_count += 1,
+            }
+        }
+
+        for window in &mut self.windows {
+            let pid = get_pid(window.hwnd);
+
+            if window.is_taskbar_hidden {
+                match inject_payload(pid, InjectionAction::ShowTaskbar) {
+                    Ok(_) => {
+                        window.is_taskbar_hidden = false;
+                        restored_count += 1;
+                    }
+                    Err(_) => error_count += 1,
+                }
+            }
+
+            if window.is_capture_hidden {
+                match inject_payload(pid, InjectionAction::ShowCapture) {
+                    Ok(_) => {
+                        window.is_capture_hidden = false;
+                        restored_count += 1;
+                    }
+                    Err(_) => error_count += 1,
+                }
+            }
+        }
+
+        self.selected_window_idx.clear();
+        (restored_count, error_count)
+    }
+
     fn persist_settings(&self) {
         let settings = AppSettings {
             enable_auto_update: self.enable_auto_update,
@@ -397,26 +512,7 @@ impl eframe::App for WinHiderApp {
         // --- 1. Background Logic ---
         if let Ok(elapsed) = SystemTime::now().duration_since(self.last_refresh) {
             if elapsed > Duration::from_secs(2) {
-                let new_windows = enumerate_windows(ctx);
-                let mut merged = Vec::new();
-                for mut w in new_windows {
-                    if let Some(old) = self.windows.iter().find(|o| o.hwnd == w.hwnd) {
-                        w.is_taskbar_hidden = old.is_taskbar_hidden;
-                        w.is_capture_hidden = old.is_capture_hidden;
-                    } else {
-                        // Auto-hide new windows if they match the list
-                        if self.should_auto_hide(&w.title) {
-                            w.is_taskbar_hidden = true;
-                            w.is_capture_hidden = true;
-                            let pid = get_pid(w.hwnd);
-                            let _ = inject_payload(pid, InjectionAction::HideTaskbar);
-                            let _ = inject_payload(pid, InjectionAction::HideCapture);
-                        }
-                    }
-                    merged.push(w);
-                }
-                self.windows = merged;
-                self.last_refresh = SystemTime::now();
+                self.refresh_window_list(ctx, false, false);
             }
         }
 
@@ -752,11 +848,18 @@ impl eframe::App for WinHiderApp {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(tr(ui_language, "Target Applications")).strong());
                 if ui.button(tr(ui_language, "🔄 Force Refresh")).clicked() {
-                    self.windows = enumerate_windows(ctx);
-                    self.monitors = Monitor::enumerate().unwrap_or_default();
-                    self.last_refresh = SystemTime::now();
-                    self.selected_window_idx.clear(); // Reset selection on refresh
+                    self.refresh_window_list(ctx, true, true);
                     self.status_msg = tr(self.language, "List refreshed.").to_string();
+                }
+                if ui
+                    .button(tr(ui_language, "Reset Hidden States"))
+                    .on_hover_text(tr(
+                        ui_language,
+                        "Restore all windows currently marked as hidden by WinHider.",
+                    ))
+                    .clicked()
+                {
+                    self.show_reset_confirm_dialog = true;
                 }
             });
 
@@ -773,6 +876,9 @@ impl eframe::App for WinHiderApp {
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
+
+                    let auto_hide_list_snapshot = self.auto_hide_list.clone();
+                    let mut pending_auto_hide_add: Option<String> = None;
 
                     for window in &mut self.windows {
                         ui.group(|ui| {
@@ -845,6 +951,36 @@ impl eframe::App for WinHiderApp {
                                             .color(egui::Color32::YELLOW),
                                     );
                                 }
+
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        let is_configured = auto_hide_list_contains(
+                                            &auto_hide_list_snapshot,
+                                            &window.title,
+                                        );
+                                        let response = ui.add_enabled(
+                                            !is_configured,
+                                            egui::Button::new(tr(
+                                                ui_language,
+                                                "Add to Startup Auto-Hide",
+                                            )),
+                                        );
+                                        if response
+                                            .on_hover_text(if is_configured {
+                                                tr(ui_language, "Already in startup auto-hide list.")
+                                            } else {
+                                                tr(
+                                                    ui_language,
+                                                    "Add this window title to startup auto-hide list.",
+                                                )
+                                            })
+                                            .clicked()
+                                        {
+                                            pending_auto_hide_add = Some(window.title.clone());
+                                        }
+                                    },
+                                );
                             });
 
                             ui.horizontal(|ui| {
@@ -906,6 +1042,32 @@ impl eframe::App for WinHiderApp {
                                 }
                             });
                         });
+                    }
+
+                    if let Some(title) = pending_auto_hide_add {
+                        match self.add_auto_hide_app(&title) {
+                            Ok(true) => {
+                                self.status_msg = tr_format(
+                                    self.language,
+                                    "Added to startup auto-hide: {title}",
+                                    &[("title", title)],
+                                );
+                            }
+                            Ok(false) => {
+                                self.status_msg = tr_format(
+                                    self.language,
+                                    "Already in startup auto-hide: {title}",
+                                    &[("title", title)],
+                                );
+                            }
+                            Err(e) => {
+                                self.status_msg = tr_format(
+                                    self.language,
+                                    "Failed to save auto-hide list: {error}",
+                                    &[("error", e)],
+                                );
+                            }
+                        }
                     }
                 });
         });
@@ -1123,6 +1285,69 @@ impl eframe::App for WinHiderApp {
             }
         }
 
+        // --- RESET CONFIRMATION DIALOG ---
+        if self.show_reset_confirm_dialog {
+            let mut is_open = true;
+            let mut should_reset = false;
+            let mut should_cancel = false;
+
+            egui::Window::new(tr(ui_language, "Reset Hidden States"))
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .default_width(420.0)
+                .open(&mut is_open)
+                .show(ctx, |ui| {
+                    ui.label(tr(
+                        ui_language,
+                        "This will restore all windows currently marked as hidden by WinHider.",
+                    ));
+                    ui.add_space(6.0);
+                    ui.label(
+                        egui::RichText::new(tr(
+                            ui_language,
+                            "The startup auto-hide list will not be changed.",
+                        ))
+                        .small()
+                        .color(egui::Color32::GRAY),
+                    );
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        if ui.button(tr(ui_language, "Reset Now")).clicked() {
+                            should_reset = true;
+                        }
+                        if ui.button(tr(ui_language, "Cancel")).clicked() {
+                            should_cancel = true;
+                        }
+                    });
+                });
+
+            if should_reset {
+                let (restored_count, error_count) = self.reset_hidden_states(self_hwnd);
+                self.status_msg = if error_count > 0 {
+                    tr_format(
+                        self.language,
+                        "Reset completed with {errors} errors; restored {count} hidden states.",
+                        &[
+                            ("errors", error_count.to_string()),
+                            ("count", restored_count.to_string()),
+                        ],
+                    )
+                } else if restored_count > 0 {
+                    tr_format(
+                        self.language,
+                        "Reset completed: restored {count} hidden states.",
+                        &[("count", restored_count.to_string())],
+                    )
+                } else {
+                    tr(self.language, "No hidden states to reset.").to_string()
+                };
+                self.show_reset_confirm_dialog = false;
+            } else if should_cancel || !is_open {
+                self.show_reset_confirm_dialog = false;
+            }
+        }
+
         // --- AUTO-HIDE EDITOR DIALOG ---
         if self.show_auto_hide_editor {
             let mut is_open = true;
@@ -1234,7 +1459,11 @@ fn is_version_newer(current: &str, new: &str) -> bool {
     let parse_version = |v: &str| -> Vec<u32> {
         v.trim_start_matches('v')
             .split('.')
-            .map(|s| s.parse::<u32>().unwrap_or(0))
+            .map(|s| {
+                let numeric_prefix: String =
+                    s.chars().take_while(|ch| ch.is_ascii_digit()).collect();
+                numeric_prefix.parse::<u32>().unwrap_or(0)
+            })
             .collect()
     };
 
@@ -1719,6 +1948,11 @@ fn save_auto_hide_list(list: &[String]) -> std::io::Result<()> {
     std::fs::write(file_path, content)
 }
 
+fn auto_hide_list_contains(list: &[String], app_title: &str) -> bool {
+    list.iter()
+        .any(|item| item.trim().eq_ignore_ascii_case(app_title.trim()))
+}
+
 fn load_settings() -> AppSettings {
     let config_dir = get_config_dir();
     let file_path = config_dir.join("settings.json");
@@ -1759,7 +1993,54 @@ impl WinHiderApp {
     }
 }
 
+fn ensure_elevated_on_startup() {
+    if is_running_as_admin() {
+        return;
+    }
+
+    if relaunch_as_admin() {
+        std::process::exit(0);
+    }
+}
+
+fn is_running_as_admin() -> bool {
+    unsafe { IsUserAnAdmin().as_bool() }
+}
+
+fn relaunch_as_admin() -> bool {
+    let Ok(exe_path) = std::env::current_exe() else {
+        return false;
+    };
+
+    let exe_path_w: Vec<u16> = exe_path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let working_dir_w = std::env::current_dir().ok().map(|dir| {
+        dir.as_os_str()
+            .encode_wide()
+            .chain(Some(0))
+            .collect::<Vec<u16>>()
+    });
+    let working_dir = working_dir_w
+        .as_ref()
+        .map(|dir| PCWSTR(dir.as_ptr()))
+        .unwrap_or_else(PCWSTR::null);
+
+    let result = unsafe {
+        ShellExecuteW(
+            HWND(0),
+            w!("runas"),
+            PCWSTR(exe_path_w.as_ptr()),
+            PCWSTR::null(),
+            working_dir,
+            SW_SHOWNORMAL,
+        )
+    };
+
+    result.0 as isize > 32
+}
+
 fn main() -> eframe::Result<()> {
+    ensure_elevated_on_startup();
+
     // Load Icon data for Window Titlebar (Reuse logic via utils)
     // This now safely handles the ICO file without crashing
     let (icon_data, _) = load_app_icon();

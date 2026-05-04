@@ -119,12 +119,35 @@ fn zh_cn(english: &'static str) -> Option<&'static str> {
         "Hide Self from Taskbar" => "从任务栏隐藏自身",
         "Target Applications" => "目标应用",
         "🔄 Force Refresh" => "🔄 强制刷新",
+        "Reset Hidden States" => "重置隐藏状态",
+        "Restore all windows currently marked as hidden by WinHider." => {
+            "恢复所有当前被 WinHider 标记为隐藏的窗口。"
+        }
+        "This will restore all windows currently marked as hidden by WinHider." => {
+            "这会恢复所有当前被 WinHider 标记为隐藏的窗口。"
+        }
+        "The startup auto-hide list will not be changed." => "启动时自动隐藏列表不会被修改。",
+        "Reset Now" => "立即重置",
+        "Reset completed: restored {count} hidden states." => {
+            "重置完成：已恢复 {count} 个隐藏状态。"
+        }
+        "Reset completed with {errors} errors; restored {count} hidden states." => {
+            "重置完成，但有 {errors} 个错误；已恢复 {count} 个隐藏状态。"
+        }
+        "No hidden states to reset." => "没有需要重置的隐藏状态。",
         "List refreshed." => "列表已刷新。",
         "Hotkeys: Ctrl+S=Toggle Capture, Ctrl+T=Toggle Taskbar (select windows first, Ctrl+click for multi-select)" => {
             "快捷键：Ctrl+S=切换截图隐藏，Ctrl+T=切换任务栏隐藏（请先选择窗口，Ctrl+点击可多选）"
         }
         "Selected: {count} windows" => "已选择：{count} 个窗口",
         "← Selected" => "← 已选择",
+        "Add to Startup Auto-Hide" => "加入启动隐藏",
+        "Already in startup auto-hide list." => "已在启动自动隐藏列表中。",
+        "Add this window title to startup auto-hide list." => {
+            "把这个窗口标题加入启动自动隐藏列表。"
+        }
+        "Added to startup auto-hide: {title}" => "已加入启动自动隐藏：{title}",
+        "Already in startup auto-hide: {title}" => "已在启动自动隐藏中：{title}",
         "Hide Taskbar" => "隐藏任务栏",
         "Hide Capture" => "隐藏截图",
         "Error: {error}" => "错误：{error}",
