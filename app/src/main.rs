@@ -25,23 +25,26 @@
 
 #![windows_subsystem = "windows"]
 
-use eframe::egui;
-use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use std::ffi::c_void; 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::path::PathBuf;
-use std::env;
-use chrono::Datelike; 
+mod i18n;
 
-use windows::core::{s};
+use chrono::Datelike;
+use eframe::egui;
+use i18n::{Language, tr, tr_format};
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use std::env;
+use std::ffi::c_void;
+use std::path::PathBuf;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
 use windows::Win32::Foundation::*;
+use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::Diagnostics::Debug::*;
+use windows::Win32::System::Diagnostics::ToolHelp::*;
 use windows::Win32::System::LibraryLoader::*;
 use windows::Win32::System::Memory::*;
 use windows::Win32::System::Threading::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::Win32::System::Diagnostics::ToolHelp::*;
-use windows::Win32::Graphics::Gdi::*;
+use windows::core::s;
 
 // WGC Imports
 use windows_capture::{
@@ -65,15 +68,13 @@ const APP_VERSION_DEFAULT: &str = "v1.0.0";
 const VERSION_FILE: &str = "appver.txt";
 const USER_AGENT: &str = "WinHider-App";
 
-
 // Windows to ignore in the list
 pub const IGNORED_WINDOWS: &[&str] = &[
-    "Program Manager", 
-    "Settings", 
+    "Program Manager",
+    "Settings",
     "Microsoft Text Input Application",
-    "WinHider"
+    "WinHider",
 ];
-
 
 // ===============================
 // Data Models
@@ -84,10 +85,12 @@ struct AppSettings {
     enable_auto_update: bool,
     #[serde(default = "default_preview_quality")]
     preview_quality: u32,
+    #[serde(default)]
+    language: Language,
 }
 
 fn default_preview_quality() -> u32 {
-    2  // Default: Medium quality (scale factor 2)
+    2 // Default: Medium quality (scale factor 2)
 }
 
 enum InjectionAction {
@@ -102,17 +105,17 @@ enum UpdateStatus {
     Idle,
     Checking,
     UpToDate,
-    UpdateAvailable(String), 
+    UpdateAvailable(String),
     Error(String),
 }
 
 #[derive(Clone)]
 pub struct AppWindow {
     pub hwnd: HWND,
-    pub pid: u32, 
+    pub pid: u32,
     pub title: String,
     pub is_taskbar_hidden: bool,
-    pub is_capture_hidden: bool, 
+    pub is_capture_hidden: bool,
     pub icon_texture: Option<egui::TextureHandle>,
 }
 
@@ -132,7 +135,7 @@ impl GraphicsCaptureApiHandler for WgcHandler {
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
         Ok(Self {
             sender: ctx.flags,
-            preview_quality: 2,  // Default quality
+            preview_quality: 2, // Default quality
         })
     }
 
@@ -147,25 +150,25 @@ impl GraphicsCaptureApiHandler for WgcHandler {
 
         let width = frame.width();
         let height = frame.height();
-        
+
         if let Ok(mut buffer) = frame.buffer() {
             if let Ok(raw_slice) = buffer.as_nopadding_buffer() {
                 // Nearest Neighbor Downscale (Fast)
-                let scale_factor = 3; 
+                let scale_factor = 3;
                 let new_width = width / scale_factor;
                 let new_height = height / scale_factor;
-                
+
                 let mut fast_buffer = Vec::with_capacity((new_width * new_height * 4) as usize);
-                let stride = (width * 4) as usize; 
-                
+                let stride = (width * 4) as usize;
+
                 for y in 0..new_height {
                     let src_y_offset = (y * scale_factor) as usize * stride;
                     for x in 0..new_width {
                         let src_x_offset = (x * scale_factor) as usize * 4;
                         let i = src_y_offset + src_x_offset;
-                        
+
                         if i + 4 <= raw_slice.len() {
-                            fast_buffer.extend_from_slice(&raw_slice[i..i+4]);
+                            fast_buffer.extend_from_slice(&raw_slice[i..i + 4]);
                         }
                     }
                 }
@@ -189,7 +192,7 @@ impl GraphicsCaptureApiHandler for WgcHandler {
 
 struct WinHiderApp {
     // App Config
-    app_version: String, 
+    app_version: String,
     app_icon_texture: Option<egui::TextureHandle>, // NEW: Stores the loaded whicon.ico
 
     self_hide_capture: bool,
@@ -197,14 +200,14 @@ struct WinHiderApp {
     windows: Vec<AppWindow>,
     status_msg: String,
     last_refresh: SystemTime,
-    
+
     // Preview Fields
     monitors: Vec<Monitor>,
     selected_monitor_idx: usize,
     show_preview: bool,
     preview_texture: Option<egui::TextureHandle>,
     preview_quality: u32,
-    
+
     // UI State
     show_about_dialog: bool,
     show_update_dialog: bool,
@@ -217,12 +220,13 @@ struct WinHiderApp {
 
     // Settings
     enable_auto_update: bool,
+    language: Language,
 
     // Communication Channels
     capture_control: Option<CaptureControl<WgcHandler, Box<dyn std::error::Error + Send + Sync>>>,
     frame_receiver: crossbeam_channel::Receiver<egui::ColorImage>,
-    frame_sender: crossbeam_channel::Sender<egui::ColorImage>, 
-    
+    frame_sender: crossbeam_channel::Sender<egui::ColorImage>,
+
     update_sender: crossbeam_channel::Sender<UpdateStatus>,
     update_receiver: crossbeam_channel::Receiver<UpdateStatus>,
 }
@@ -231,29 +235,32 @@ impl WinHiderApp {
     // REPLACED default() with new(cc) to handle texture loading
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         clean_temp_files();
-        
+        i18n::install_locale_fonts(&cc.egui_ctx);
+
         let app_version = std::fs::read_to_string(VERSION_FILE)
             .unwrap_or_else(|_| APP_VERSION_DEFAULT.to_string())
             .trim()
             .to_string();
 
         let settings = load_settings();
+        let language = settings.language;
 
         // --- LOAD APP ICON FOR UI ---
         // This embeds the icon into the binary so it works even if the .ico file is deleted
-        let icon_bytes = include_bytes!("../../Misc/whicon-small.ico"); 
+        let icon_bytes = include_bytes!("../../Misc/whicon-small.ico");
         let image = image::load_from_memory(icon_bytes).expect("Failed to load whicon.ico");
         let size = [image.width() as _, image.height() as _];
         let image_buffer = image.to_rgba8();
         let pixels = image_buffer.as_flat_samples();
-        let color_image = egui::ColorImage::from_rgba_unmultiplied(
-            size,
-            pixels.as_slice(),
-        );
-        let app_icon_texture = Some(cc.egui_ctx.load_texture("app_icon", color_image, egui::TextureOptions::LINEAR));
+        let color_image = egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+        let app_icon_texture = Some(cc.egui_ctx.load_texture(
+            "app_icon",
+            color_image,
+            egui::TextureOptions::LINEAR,
+        ));
 
         let (tx, rx) = crossbeam_channel::bounded(1);
-        let (up_tx, up_rx) = crossbeam_channel::unbounded(); 
+        let (up_tx, up_rx) = crossbeam_channel::unbounded();
         let monitors = Monitor::enumerate().unwrap_or_default();
 
         let mut app = Self {
@@ -262,9 +269,9 @@ impl WinHiderApp {
             self_hide_capture: false,
             self_hide_taskbar: false,
             windows: Vec::new(),
-            status_msg: "Ready.".to_string(),
+            status_msg: tr(language, "Ready.").to_string(),
             last_refresh: SystemTime::UNIX_EPOCH,
-            
+
             monitors,
             selected_monitor_idx: 0,
             show_preview: true,
@@ -279,21 +286,22 @@ impl WinHiderApp {
             new_app_input: String::new(),
             selected_window_idx: Vec::new(),
             enable_auto_update: settings.enable_auto_update,
-            
+            language,
+
             capture_control: None,
             frame_receiver: rx,
             frame_sender: tx,
-            
+
             update_sender: up_tx,
             update_receiver: up_rx,
         };
 
         app.start_capture_session();
-        
+
         if app.enable_auto_update {
             app.check_for_updates();
         }
-        
+
         app
     }
 
@@ -321,13 +329,13 @@ impl WinHiderApp {
             MinimumUpdateIntervalSettings::Default,
             DirtyRegionSettings::Default,
             ColorFormat::Rgba8,
-            sender
+            sender,
         );
 
         if let Ok(ctrl) = WgcHandler::start_free_threaded(settings) {
             self.capture_control = Some(ctrl);
         } else {
-            self.status_msg = "Failed to start Graphics Capture".to_string();
+            self.status_msg = tr(self.language, "Failed to start Graphics Capture").to_string();
         }
     }
 
@@ -338,18 +346,20 @@ impl WinHiderApp {
         let current_version = self.app_version.clone();
 
         std::thread::spawn(move || {
-            let url = format!("https://api.github.com/repos/{}/{}/releases/latest", REPO_OWNER, REPO_NAME);
-            
-            let resp = ureq::get(&url)
-                .set("User-Agent", USER_AGENT)
-                .call();
+            let url = format!(
+                "https://api.github.com/repos/{}/{}/releases/latest",
+                REPO_OWNER, REPO_NAME
+            );
+
+            let resp = ureq::get(&url).set("User-Agent", USER_AGENT).call();
 
             match resp {
                 Ok(response) => {
                     if let Ok(json) = response.into_json::<serde_json::Value>() {
                         if let Some(tag_name) = json["tag_name"].as_str() {
                             if is_version_newer(&current_version, tag_name) {
-                                let _ = sender.send(UpdateStatus::UpdateAvailable(tag_name.to_string()));
+                                let _ = sender
+                                    .send(UpdateStatus::UpdateAvailable(tag_name.to_string()));
                             } else {
                                 let _ = sender.send(UpdateStatus::UpToDate);
                             }
@@ -357,12 +367,21 @@ impl WinHiderApp {
                         }
                     }
                     let _ = sender.send(UpdateStatus::Error("Invalid response format".to_string()));
-                },
+                }
                 Err(e) => {
                     let _ = sender.send(UpdateStatus::Error(e.to_string()));
                 }
             }
         });
+    }
+
+    fn persist_settings(&self) {
+        let settings = AppSettings {
+            enable_auto_update: self.enable_auto_update,
+            preview_quality: self.preview_quality,
+            language: self.language,
+        };
+        let _ = save_settings(&settings);
     }
 }
 
@@ -372,6 +391,7 @@ impl WinHiderApp {
 
 impl eframe::App for WinHiderApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        let ui_language = self.language;
         let self_hwnd = get_eframe_hwnd(frame);
 
         // --- 1. Background Logic ---
@@ -403,11 +423,8 @@ impl eframe::App for WinHiderApp {
         // --- 2. WGC Frame Receiver ---
         if self.show_preview {
             if let Ok(img) = self.frame_receiver.try_recv() {
-                self.preview_texture = Some(ctx.load_texture(
-                    "screen_preview",
-                    img,
-                    egui::TextureOptions::LINEAR
-                ));
+                self.preview_texture =
+                    Some(ctx.load_texture("screen_preview", img, egui::TextureOptions::LINEAR));
             }
             ctx.request_repaint();
         } else {
@@ -428,7 +445,10 @@ impl eframe::App for WinHiderApp {
                 _ => {}
             }
             // Auto-close if no update
-            if matches!(self.update_status, UpdateStatus::UpToDate | UpdateStatus::Error(_)) {
+            if matches!(
+                self.update_status,
+                UpdateStatus::UpToDate | UpdateStatus::Error(_)
+            ) {
                 self.show_update_dialog = false;
             }
         }
@@ -438,12 +458,13 @@ impl eframe::App for WinHiderApp {
             if !self.selected_window_idx.is_empty() {
                 let mut success_count = 0;
                 for &selected_hwnd in &self.selected_window_idx {
-                    if let Some(window) = self.windows.iter_mut().find(|w| w.hwnd == selected_hwnd) {
+                    if let Some(window) = self.windows.iter_mut().find(|w| w.hwnd == selected_hwnd)
+                    {
                         let pid = get_pid(window.hwnd);
-                        let action = if window.is_capture_hidden { 
-                            InjectionAction::ShowCapture 
-                        } else { 
-                            InjectionAction::HideCapture 
+                        let action = if window.is_capture_hidden {
+                            InjectionAction::ShowCapture
+                        } else {
+                            InjectionAction::HideCapture
                         };
                         if let Ok(_) = inject_payload(pid, action) {
                             window.is_capture_hidden = !window.is_capture_hidden;
@@ -452,12 +473,17 @@ impl eframe::App for WinHiderApp {
                     }
                 }
                 if success_count > 0 {
-                    self.status_msg = format!("Ctrl+S: Toggled capture for {} windows", success_count);
+                    self.status_msg = tr_format(
+                        self.language,
+                        "Ctrl+S: Toggled capture for {count} windows",
+                        &[("count", success_count.to_string())],
+                    );
                 } else {
-                    self.status_msg = "Ctrl+S: Failed to toggle capture".to_string();
+                    self.status_msg =
+                        tr(self.language, "Ctrl+S: Failed to toggle capture").to_string();
                 }
             } else {
-                self.status_msg = "Ctrl+S: No windows selected".to_string();
+                self.status_msg = tr(self.language, "Ctrl+S: No windows selected").to_string();
             }
         }
 
@@ -465,12 +491,13 @@ impl eframe::App for WinHiderApp {
             if !self.selected_window_idx.is_empty() {
                 let mut success_count = 0;
                 for &selected_hwnd in &self.selected_window_idx {
-                    if let Some(window) = self.windows.iter_mut().find(|w| w.hwnd == selected_hwnd) {
+                    if let Some(window) = self.windows.iter_mut().find(|w| w.hwnd == selected_hwnd)
+                    {
                         let pid = get_pid(window.hwnd);
-                        let action = if window.is_taskbar_hidden { 
-                            InjectionAction::ShowTaskbar 
-                        } else { 
-                            InjectionAction::HideTaskbar 
+                        let action = if window.is_taskbar_hidden {
+                            InjectionAction::ShowTaskbar
+                        } else {
+                            InjectionAction::HideTaskbar
                         };
                         if let Ok(_) = inject_payload(pid, action) {
                             window.is_taskbar_hidden = !window.is_taskbar_hidden;
@@ -479,70 +506,107 @@ impl eframe::App for WinHiderApp {
                     }
                 }
                 if success_count > 0 {
-                    self.status_msg = format!("Ctrl+T: Toggled taskbar for {} windows", success_count);
+                    self.status_msg = tr_format(
+                        self.language,
+                        "Ctrl+T: Toggled taskbar for {count} windows",
+                        &[("count", success_count.to_string())],
+                    );
                 } else {
-                    self.status_msg = "Ctrl+T: Failed to toggle taskbar".to_string();
+                    self.status_msg =
+                        tr(self.language, "Ctrl+T: Failed to toggle taskbar").to_string();
                 }
             } else {
-                self.status_msg = "Ctrl+T: No windows selected".to_string();
+                self.status_msg = tr(self.language, "Ctrl+T: No windows selected").to_string();
             }
         }
 
         // --- 3. MENU BAR ---
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
-                ui.menu_button("File", |ui| {
-                    if ui.button("Launch CLI").clicked() {
+                ui.menu_button(tr(ui_language, "File"), |ui| {
+                    if ui.button(tr(ui_language, "Launch CLI")).clicked() {
                         if let Err(e) = launch_cli() {
-                            self.status_msg = format!("Failed to launch CLI: {}", e);
+                            self.status_msg = tr_format(
+                                self.language,
+                                "Failed to launch CLI: {error}",
+                                &[("error", e)],
+                            );
                         } else {
-                            self.status_msg = "CLI launched successfully.".to_string();
+                            self.status_msg =
+                                tr(self.language, "CLI launched successfully.").to_string();
                         }
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("Clear Temp Files").clicked() {
+                    if ui.button(tr(ui_language, "Clear Temp Files")).clicked() {
                         clean_temp_files();
-                        self.status_msg = "Temporary injection files cleaned.".to_string();
+                        self.status_msg =
+                            tr(self.language, "Temporary injection files cleaned.").to_string();
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("Exit").clicked() {
+                    if ui.button(tr(ui_language, "Exit")).clicked() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 });
 
-                ui.menu_button("Settings", |ui| {
-                    if ui.checkbox(&mut self.enable_auto_update, "Enable Auto-Updates").changed() {
-                        let settings = AppSettings { 
-                            enable_auto_update: self.enable_auto_update,
-                            preview_quality: self.preview_quality,
-                        };
-                        let _ = save_settings(&settings);
+                ui.menu_button(tr(ui_language, "Settings"), |ui| {
+                    if ui
+                        .checkbox(
+                            &mut self.enable_auto_update,
+                            tr(ui_language, "Enable Auto-Updates"),
+                        )
+                        .changed()
+                    {
+                        self.persist_settings();
                     }
-                    
+
                     ui.separator();
-                    ui.label(egui::RichText::new("Preview Quality").strong());
-                    
-                    let quality_options = [(1, "Low (Fastest)"), (2, "Medium (Balanced)"), (3, "High (Best)")];
+                    ui.label(egui::RichText::new(tr(ui_language, "Language")).strong());
+                    egui::ComboBox::from_id_source("language_select")
+                        .selected_text(self.language.display_name())
+                        .show_ui(ui, |ui| {
+                            for language in Language::ALL {
+                                if ui
+                                    .selectable_value(
+                                        &mut self.language,
+                                        language,
+                                        language.display_name(),
+                                    )
+                                    .changed()
+                                {
+                                    self.persist_settings();
+                                    self.status_msg =
+                                        tr(self.language, "Language changed.").to_string();
+                                }
+                            }
+                        });
+
+                    ui.separator();
+                    ui.label(egui::RichText::new(tr(ui_language, "Preview Quality")).strong());
+
+                    let quality_options = [
+                        (1, tr(ui_language, "Low (Fastest)")),
+                        (2, tr(ui_language, "Medium (Balanced)")),
+                        (3, tr(ui_language, "High (Best)")),
+                    ];
                     for (value, label) in quality_options.iter() {
-                        if ui.selectable_value(&mut self.preview_quality, *value, *label).changed() {
-                            let settings = AppSettings { 
-                                enable_auto_update: self.enable_auto_update,
-                                preview_quality: self.preview_quality,
-                            };
-                            let _ = save_settings(&settings);
-                            self.start_capture_session();  // Restart to apply new quality
+                        if ui
+                            .selectable_value(&mut self.preview_quality, *value, *label)
+                            .changed()
+                        {
+                            self.persist_settings();
+                            self.start_capture_session(); // Restart to apply new quality
                         }
                     }
                 });
 
-                ui.menu_button("Help", |ui| {
-                    if ui.button("Check for Updates").clicked() {
+                ui.menu_button(tr(ui_language, "Help"), |ui| {
+                    if ui.button(tr(ui_language, "Check for Updates")).clicked() {
                         self.check_for_updates();
                         ui.close_menu();
                     }
-                    if ui.button("About").clicked() {
+                    if ui.button(tr(ui_language, "About")).clicked() {
                         self.show_about_dialog = true;
                         ui.close_menu();
                     }
@@ -555,36 +619,61 @@ impl eframe::App for WinHiderApp {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
-                        ui.heading(egui::RichText::new(APP_NAME).size(24.0).strong().color(egui::Color32::from_rgb(120, 200, 255)));
-                        ui.label(egui::RichText::new(&self.app_version).size(11.0).color(egui::Color32::from_rgb(120, 200, 255)).weak());
+                        ui.heading(
+                            egui::RichText::new(APP_NAME)
+                                .size(24.0)
+                                .strong()
+                                .color(egui::Color32::from_rgb(120, 200, 255)),
+                        );
+                        ui.label(
+                            egui::RichText::new(&self.app_version)
+                                .size(11.0)
+                                .color(egui::Color32::from_rgb(120, 200, 255))
+                                .weak(),
+                        );
                     });
                     ui.label(egui::RichText::new("Bitmutex Technologies").small().color(egui::Color32::YELLOW));
                 });
-                
+
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.checkbox(&mut self.show_preview, "Show Preview").changed() {
-                        self.start_capture_session(); 
+                    if ui
+                        .checkbox(&mut self.show_preview, tr(ui_language, "Show Preview"))
+                        .changed()
+                    {
+                        self.start_capture_session();
                     }
-                    
+
                     if !self.monitors.is_empty() {
                          let combo = egui::ComboBox::from_id_source("monitor_select")
-                            .selected_text(format!("Monitor {}", self.selected_monitor_idx + 1))
+                            .selected_text(tr_format(
+                                ui_language,
+                                "Monitor {index}",
+                                &[("index", (self.selected_monitor_idx + 1).to_string())],
+                            ))
                             .show_ui(ui, |ui| {
                                 for (i, _m) in self.monitors.iter().enumerate() {
-                                    if ui.selectable_value(&mut self.selected_monitor_idx, i, format!("Monitor {}", i + 1)).clicked() {
-                                        return true; 
+                                    if ui.selectable_value(
+                                        &mut self.selected_monitor_idx,
+                                        i,
+                                        tr_format(
+                                            ui_language,
+                                            "Monitor {index}",
+                                            &[("index", (i + 1).to_string())],
+                                        ),
+                                    ).clicked() {
+                                        return true;
                                     }
                                 }
                                 false
                             });
-                        
+
                         if let Some(true) = combo.inner {
                             self.start_capture_session();
                         }
                     }
                 });
             });
-            
+
             ui.separator();
 
             if self.show_preview {
@@ -609,7 +698,7 @@ impl eframe::App for WinHiderApp {
                                 };
                                 ui.image((texture.id(), image_size));
                             } else {
-                                ui.label("Waiting for WGC Stream...");
+                                ui.label(tr(ui_language, "Waiting for WGC Stream..."));
                             }
                         });
                     });
@@ -620,22 +709,38 @@ impl eframe::App for WinHiderApp {
 
             ui.horizontal(|ui| {
                 ui.group(|ui| {
-                    ui.label(egui::RichText::new("Auto-Hide on Start").strong());
+                    ui.label(egui::RichText::new(tr(ui_language, "Auto-Hide on Start")).strong());
                     ui.vertical(|ui| {
-                        ui.label(format!("{} apps configured", self.auto_hide_list.len()));
-                        if ui.button("Edit List").clicked() {
+                        ui.label(tr_format(
+                            ui_language,
+                            "{count} apps configured",
+                            &[("count", self.auto_hide_list.len().to_string())],
+                        ));
+                        if ui.button(tr(ui_language, "Edit List")).clicked() {
                             self.show_auto_hide_editor = true;
                         }
                     });
                 });
 
                 ui.group(|ui| {
-                    ui.label(egui::RichText::new("Local Stealth").strong());
+                    ui.label(egui::RichText::new(tr(ui_language, "Local Stealth")).strong());
                     ui.vertical(|ui| {
-                        if ui.checkbox(&mut self.self_hide_capture, "Hide Self from Capture").changed() {
+                        if ui
+                            .checkbox(
+                                &mut self.self_hide_capture,
+                                tr(ui_language, "Hide Self from Capture"),
+                            )
+                            .changed()
+                        {
                             let _ = set_capture_self(self_hwnd, self.self_hide_capture);
                         }
-                        if ui.checkbox(&mut self.self_hide_taskbar, "Hide Self from Taskbar").changed() {
+                        if ui
+                            .checkbox(
+                                &mut self.self_hide_taskbar,
+                                tr(ui_language, "Hide Self from Taskbar"),
+                            )
+                            .changed()
+                        {
                             let _ = set_taskbar_visibility_external(self_hwnd, self.self_hide_taskbar);
                         }
                     });
@@ -645,23 +750,27 @@ impl eframe::App for WinHiderApp {
             ui.add_space(10.0);
 
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Target Applications").strong());
-                if ui.button("🔄 Force Refresh").clicked() {
+                ui.label(egui::RichText::new(tr(ui_language, "Target Applications")).strong());
+                if ui.button(tr(ui_language, "🔄 Force Refresh")).clicked() {
                     self.windows = enumerate_windows(ctx);
                     self.monitors = Monitor::enumerate().unwrap_or_default();
                     self.last_refresh = SystemTime::now();
                     self.selected_window_idx.clear(); // Reset selection on refresh
-                    self.status_msg = "List refreshed.".to_string();
+                    self.status_msg = tr(self.language, "List refreshed.").to_string();
                 }
             });
 
             ui.add_space(5.0);
             ui.label(egui::RichText::new(&self.status_msg).color(egui::Color32::LIGHT_BLUE));
-            ui.label(egui::RichText::new("Hotkeys: Ctrl+S=Toggle Capture, Ctrl+T=Toggle Taskbar (select windows first, Ctrl+click for multi-select)").small().color(egui::Color32::GRAY));
+            ui.label(
+                egui::RichText::new(tr(ui_language, "Hotkeys: Ctrl+S=Toggle Capture, Ctrl+T=Toggle Taskbar (select windows first, Ctrl+click for multi-select)"))
+                    .small()
+                    .color(egui::Color32::GRAY),
+            );
             ui.separator();
 
             egui::ScrollArea::vertical()
-                .auto_shrink([false, false]) 
+                .auto_shrink([false, false])
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
 
@@ -681,7 +790,7 @@ impl eframe::App for WinHiderApp {
 
                                 // Create a LayoutJob to mix styles in one clickable label
                                 let mut job = egui::text::LayoutJob::default();
-                                
+
                                 // Part A: Title (White, Proportional)
                                 job.append(
                                     &display_title,
@@ -721,32 +830,56 @@ impl eframe::App for WinHiderApp {
                                             self.selected_window_idx.push(window.hwnd);
                                         }
                                     }
-                                    self.status_msg = format!("Selected: {} windows", self.selected_window_idx.len());
+                                    self.status_msg = tr_format(
+                                        self.language,
+                                        "Selected: {count} windows",
+                                        &[("count", self.selected_window_idx.len().to_string())],
+                                    );
                                 }
 
                                 // 4. Selection Indicator
                                 if is_selected {
-                                    ui.label(egui::RichText::new("← Selected").small().color(egui::Color32::YELLOW));
+                                    ui.label(
+                                        egui::RichText::new(tr(ui_language, "← Selected"))
+                                            .small()
+                                            .color(egui::Color32::YELLOW),
+                                    );
                                 }
                             });
 
                             ui.horizontal(|ui| {
-                                if ui.checkbox(&mut window.is_taskbar_hidden, "Hide Taskbar").changed() {
+                                if ui
+                                    .checkbox(
+                                        &mut window.is_taskbar_hidden,
+                                        tr(ui_language, "Hide Taskbar"),
+                                    )
+                                    .changed()
+                                {
                                     let pid = get_pid(window.hwnd);
-                                    let action = if window.is_taskbar_hidden { 
-                                        InjectionAction::HideTaskbar 
-                                    } else { 
-                                        InjectionAction::ShowTaskbar 
+                                    let action = if window.is_taskbar_hidden {
+                                        InjectionAction::HideTaskbar
+                                    } else {
+                                        InjectionAction::ShowTaskbar
                                     };
                                     if let Err(e) = inject_payload(pid, action) {
-                                        self.status_msg = format!("Error: {}", e);
+                                        self.status_msg = tr_format(
+                                            self.language,
+                                            "Error: {error}",
+                                            &[("error", e)],
+                                        );
                                         window.is_taskbar_hidden = !window.is_taskbar_hidden;
                                     }
                                 }
 
                                 ui.separator();
 
-                                if ui.checkbox(&mut window.is_capture_hidden, "Hide Capture").changed() {
+                                if ui
+                                    .checkbox(
+                                        &mut window.is_capture_hidden,
+                                        tr(ui_language, "Hide Capture"),
+                                    )
+                                    .changed()
+                                {
                                     let pid = get_pid(window.hwnd);
                                     let action = if window.is_capture_hidden {
                                         InjectionAction::HideCapture
@@ -754,9 +887,19 @@ impl eframe::App for WinHiderApp {
                                         InjectionAction::ShowCapture
                                     };
                                     match inject_payload(pid, action) {
-                                        Ok(_) => self.status_msg = format!("Capture state updated: {}", window.title),
+                                        Ok(_) => {
+                                            self.status_msg = tr_format(
+                                                self.language,
+                                                "Capture state updated: {title}",
+                                                &[("title", window.title.clone())],
+                                            );
+                                        }
                                         Err(e) => {
-                                            self.status_msg = format!("Error: {}", e);
+                                            self.status_msg = tr_format(
+                                                self.language,
+                                                "Error: {error}",
+                                                &[("error", e)],
+                                            );
                                             window.is_capture_hidden = !window.is_capture_hidden;
                                         }
                                     }
@@ -772,7 +915,7 @@ impl eframe::App for WinHiderApp {
             let mut is_open = true;
             let mut should_close = false;
 
-            egui::Window::new("Check for Updates")
+            egui::Window::new(tr(ui_language, "Check for Updates"))
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
@@ -782,33 +925,62 @@ impl eframe::App for WinHiderApp {
                         match &self.update_status {
                             UpdateStatus::Checking => {
                                 ui.spinner();
-                                ui.label("Checking GitHub for updates...");
+                                ui.label(tr(ui_language, "Checking GitHub for updates..."));
                             },
                             UpdateStatus::UpToDate => {
-                                ui.label(egui::RichText::new("✓ You are up to date!").color(egui::Color32::GREEN));
-                                ui.label(format!("Current version: {}", self.app_version));
-                                if ui.button("Close").clicked() {
+                                ui.label(
+                                    egui::RichText::new(tr(ui_language, "✓ You are up to date!"))
+                                        .color(egui::Color32::GREEN),
+                                );
+                                ui.label(tr_format(
+                                    ui_language,
+                                    "Current version: {version}",
+                                    &[("version", self.app_version.clone())],
+                                ));
+                                if ui.button(tr(ui_language, "Close")).clicked() {
                                     should_close = true;
                                 }
                             },
                             UpdateStatus::UpdateAvailable(new_tag) => {
-                                ui.heading(egui::RichText::new("New Version Available!").color(egui::Color32::YELLOW));
-                                ui.label(format!("Current: {}", self.app_version));
-                                ui.label(format!("Latest:  {}", new_tag));
+                                ui.heading(
+                                    egui::RichText::new(tr(ui_language, "New Version Available!"))
+                                        .color(egui::Color32::YELLOW),
+                                );
+                                ui.label(tr_format(
+                                    ui_language,
+                                    "Current: {version}",
+                                    &[("version", self.app_version.clone())],
+                                ));
+                                ui.label(tr_format(
+                                    ui_language,
+                                    "Latest: {version}",
+                                    &[("version", new_tag.clone())],
+                                ));
                                 ui.add_space(10.0);
-                                
-                                if ui.button(egui::RichText::new("⬇ Download Installer").size(16.0)).clicked() {
+
+                                if ui
+                                    .button(
+                                        egui::RichText::new(tr(ui_language, "⬇ Download Installer"))
+                                            .size(16.0),
+                                    )
+                                    .clicked()
+                                {
                                     let download_url = format!(
                                         "https://github.com/{}/{}/releases/download/{}/WinhiderInstaller.exe",
                                         REPO_OWNER, REPO_NAME, new_tag
                                     );
-                                    let _ = std::process::Command::new("cmd").args(["/C", "start", &download_url]).spawn();
+                                    let _ = std::process::Command::new("cmd")
+                                        .args(["/C", "start", &download_url])
+                                        .spawn();
                                 }
                             },
                             UpdateStatus::Error(err) => {
-                                ui.label(egui::RichText::new("⚠ Check Failed").color(egui::Color32::RED));
+                                ui.label(
+                                    egui::RichText::new(tr(ui_language, "⚠ Check Failed"))
+                                        .color(egui::Color32::RED),
+                                );
                                 ui.label(err);
-                                if ui.button("Close").clicked() {
+                                if ui.button(tr(ui_language, "Close")).clicked() {
                                     should_close = true;
                                 }
                             },
@@ -816,7 +988,7 @@ impl eframe::App for WinHiderApp {
                         }
                     });
                 });
-            
+
             if !is_open || should_close {
                 self.show_update_dialog = false;
             }
@@ -826,7 +998,11 @@ impl eframe::App for WinHiderApp {
         if self.show_about_dialog {
             let mut is_open = true;
 
-            egui::Window::new(format!("About {}", APP_NAME))
+            egui::Window::new(tr_format(
+                ui_language,
+                "About {app}",
+                &[("app", APP_NAME.to_string())],
+            ))
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
@@ -851,7 +1027,11 @@ impl eframe::App for WinHiderApp {
 
                         // Version
                         ui.label(
-                            egui::RichText::new(format!("Version {}", self.app_version))
+                            egui::RichText::new(tr_format(
+                                ui_language,
+                                "Version {version}",
+                                &[("version", self.app_version.clone())],
+                            ))
                                 .size(13.0)
                                 .color(egui::Color32::GRAY),
                         );
@@ -864,13 +1044,17 @@ impl eframe::App for WinHiderApp {
                                 egui::Color32::GREEN // Green for up to date
                             };
                             ui.label(
-                                egui::RichText::new(format!("Latest: {}", latest))
+                                egui::RichText::new(tr_format(
+                                    ui_language,
+                                    "Latest: {version}",
+                                    &[("version", latest.clone())],
+                                ))
                                     .size(12.0)
                                     .color(color),
                             );
                         } else {
                             ui.label(
-                                egui::RichText::new("Latest: Checking...")
+                                egui::RichText::new(tr(ui_language, "Latest: Checking..."))
                                     .size(12.0)
                                     .color(egui::Color32::GRAY),
                             );
@@ -882,26 +1066,41 @@ impl eframe::App for WinHiderApp {
 
                         // Description block
                         ui.label(
-                            egui::RichText::new("Professional Window Visibility Controller")
-                                .strong(),
+                            egui::RichText::new(tr(
+                                ui_language,
+                                "Professional Window Visibility Controller",
+                            ))
+                            .strong(),
                         );
 
                         ui.add_space(6.0);
 
                         ui.label(
-                            egui::RichText::new(
-                                "WinHider allows advanced control over how application windows \
-                                appear to the system and screen capture software."
-                            )
+                            egui::RichText::new(tr(
+                                ui_language,
+                                "WinHider allows advanced control over how application windows appear to the system and screen capture software.",
+                            ))
                             .color(egui::Color32::from_gray(200)),
                         );
 
                         ui.add_space(6.0);
 
-                        ui.label("• Hide windows from screen capture (OBS, Teams, Zoom)");
-                        ui.label("• Remove windows from Taskbar and Alt-Tab");
-                        ui.label("• Maintain normal usability while hidden");
-                        ui.label("• Auto-Hide on startup based on custom list");
+                        ui.label(tr(
+                            ui_language,
+                            "• Hide windows from screen capture (OBS, Teams, Zoom)",
+                        ));
+                        ui.label(tr(
+                            ui_language,
+                            "• Remove windows from Taskbar and Alt-Tab",
+                        ));
+                        ui.label(tr(
+                            ui_language,
+                            "• Maintain normal usability while hidden",
+                        ));
+                        ui.label(tr(
+                            ui_language,
+                            "• Auto-Hide on startup based on custom list",
+                        ));
 
                         ui.add_space(14.0);
                         ui.separator();
@@ -929,7 +1128,7 @@ impl eframe::App for WinHiderApp {
             let mut is_open = true;
             let mut should_save = false;
 
-            egui::Window::new("Auto-Hide Applications")
+            egui::Window::new(tr(ui_language, "Auto-Hide Applications"))
                 .collapsible(false)
                 .resizable(true)
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
@@ -938,7 +1137,10 @@ impl eframe::App for WinHiderApp {
                 .open(&mut is_open)
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.label("Applications to automatically hide on startup:");
+                        ui.label(tr(
+                            ui_language,
+                            "Applications to automatically hide on startup:",
+                        ));
                         ui.add_space(10.0);
                     });
 
@@ -952,7 +1154,11 @@ impl eframe::App for WinHiderApp {
                             for (i, app) in self.auto_hide_list.iter().enumerate() {
                                 ui.horizontal(|ui| {
                                     ui.label(app);
-                                    if ui.button("❌").on_hover_text("Remove").clicked() {
+                                    if ui
+                                        .button("❌")
+                                        .on_hover_text(tr(ui_language, "Remove"))
+                                        .clicked()
+                                    {
                                         to_remove = Some(i);
                                     }
                                 });
@@ -966,17 +1172,23 @@ impl eframe::App for WinHiderApp {
                     ui.add_space(10.0);
 
                     ui.horizontal(|ui| {
-                        ui.label("Add application:");
+                        ui.label(tr(ui_language, "Add application:"));
                         let response = ui.text_edit_singleline(&mut self.new_app_input);
                         if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            if !self.new_app_input.trim().is_empty() && !self.auto_hide_list.contains(&self.new_app_input) {
-                                self.auto_hide_list.push(self.new_app_input.trim().to_string());
+                            if !self.new_app_input.trim().is_empty()
+                                && !self.auto_hide_list.contains(&self.new_app_input)
+                            {
+                                self.auto_hide_list
+                                    .push(self.new_app_input.trim().to_string());
                                 self.new_app_input.clear();
                             }
                         }
-                        if ui.button("Add").clicked() {
-                            if !self.new_app_input.trim().is_empty() && !self.auto_hide_list.contains(&self.new_app_input) {
-                                self.auto_hide_list.push(self.new_app_input.trim().to_string());
+                        if ui.button(tr(ui_language, "Add")).clicked() {
+                            if !self.new_app_input.trim().is_empty()
+                                && !self.auto_hide_list.contains(&self.new_app_input)
+                            {
+                                self.auto_hide_list
+                                    .push(self.new_app_input.trim().to_string());
                                 self.new_app_input.clear();
                             }
                         }
@@ -986,10 +1198,10 @@ impl eframe::App for WinHiderApp {
                     ui.separator();
 
                     ui.horizontal(|ui| {
-                        if ui.button("Save & Close").clicked() {
+                        if ui.button(tr(ui_language, "Save & Close")).clicked() {
                             should_save = true;
                         }
-                        if ui.button("Cancel").clicked() {
+                        if ui.button(tr(ui_language, "Cancel")).clicked() {
                             // Reload the list to discard changes
                             self.auto_hide_list = load_auto_hide_list();
                         }
@@ -999,15 +1211,18 @@ impl eframe::App for WinHiderApp {
             if !is_open || should_save {
                 if should_save {
                     if let Err(e) = save_auto_hide_list(&self.auto_hide_list) {
-                        self.status_msg = format!("Failed to save auto-hide list: {}", e);
+                        self.status_msg = tr_format(
+                            self.language,
+                            "Failed to save auto-hide list: {error}",
+                            &[("error", e.to_string())],
+                        );
                     } else {
-                        self.status_msg = "Auto-hide list saved.".to_string();
+                        self.status_msg = tr(self.language, "Auto-hide list saved.").to_string();
                     }
                 }
                 self.show_auto_hide_editor = false;
             }
         }
-
     }
 }
 
@@ -1029,8 +1244,12 @@ fn is_version_newer(current: &str, new: &str) -> bool {
     for i in 0..std::cmp::max(curr_parts.len(), new_parts.len()) {
         let c = *curr_parts.get(i).unwrap_or(&0);
         let n = *new_parts.get(i).unwrap_or(&0);
-        if n > c { return true; }
-        if n < c { return false; }
+        if n > c {
+            return true;
+        }
+        if n < c {
+            return false;
+        }
     }
     false
 }
@@ -1038,12 +1257,22 @@ fn is_version_newer(current: &str, new: &str) -> bool {
 #[allow(unused_must_use)]
 fn get_window_icon(hwnd: HWND, _ctx: &egui::Context) -> Option<egui::TextureHandle> {
     unsafe {
-        let mut hicon = SendMessageW(hwnd, WM_GETICON, WPARAM(ICON_BIG as usize), LPARAM(0)).0 as isize;
-        if hicon == 0 { hicon = SendMessageW(hwnd, WM_GETICON, WPARAM(ICON_SMALL as usize), LPARAM(0)).0 as isize; }
-        if hicon == 0 { hicon = GetClassLongPtrW(hwnd, GCL_HICON) as isize; }
-        if hicon == 0 { hicon = LoadIconW(None, IDI_APPLICATION).unwrap().0 as isize; }
-        
-        if hicon == 0 { return None; }
+        let mut hicon =
+            SendMessageW(hwnd, WM_GETICON, WPARAM(ICON_BIG as usize), LPARAM(0)).0 as isize;
+        if hicon == 0 {
+            hicon =
+                SendMessageW(hwnd, WM_GETICON, WPARAM(ICON_SMALL as usize), LPARAM(0)).0 as isize;
+        }
+        if hicon == 0 {
+            hicon = GetClassLongPtrW(hwnd, GCL_HICON) as isize;
+        }
+        if hicon == 0 {
+            hicon = LoadIconW(None, IDI_APPLICATION).unwrap().0 as isize;
+        }
+
+        if hicon == 0 {
+            return None;
+        }
         let hicon = HICON(hicon);
 
         let width = 32;
@@ -1051,14 +1280,14 @@ fn get_window_icon(hwnd: HWND, _ctx: &egui::Context) -> Option<egui::TextureHand
 
         let hdc_screen = GetDC(HWND(0));
         let hdc_mem = CreateCompatibleDC(hdc_screen);
-        
+
         let bmi = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
                 biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
                 biWidth: width,
-                biHeight: -height, 
+                biHeight: -height,
                 biPlanes: 1,
-                biBitCount: 32, 
+                biBitCount: 32,
                 biCompression: BI_RGB.0,
                 ..Default::default()
             },
@@ -1080,25 +1309,30 @@ fn get_window_icon(hwnd: HWND, _ctx: &egui::Context) -> Option<egui::TextureHand
 
         let pixel_count = (width * height) as usize;
         let src_slice = std::slice::from_raw_parts_mut(p_bits as *mut u8, pixel_count * 4);
-        
+
         for chunk in src_slice.chunks_exact_mut(4) {
             let b = chunk[0];
             let r = chunk[2];
-            chunk[0] = r; 
-            chunk[2] = b; 
+            chunk[0] = r;
+            chunk[2] = b;
             if chunk[3] == 0 && (chunk[0] != 0 || chunk[1] != 0 || chunk[2] != 0) {
                 chunk[3] = 255;
             }
         }
 
-        let image = egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], src_slice);
+        let image =
+            egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], src_slice);
 
         SelectObject(hdc_mem, old_obj);
         DeleteObject(HGDIOBJ(hbitmap.0));
         DeleteDC(hdc_mem);
         ReleaseDC(HWND(0), hdc_screen);
 
-        Some(_ctx.load_texture(format!("icon_{}", hicon.0), image, egui::TextureOptions::LINEAR))
+        Some(_ctx.load_texture(
+            format!("icon_{}", hicon.0),
+            image,
+            egui::TextureOptions::LINEAR,
+        ))
     }
 }
 
@@ -1110,15 +1344,23 @@ fn inject_payload(target_pid: u32, action: InjectionAction) -> std::result::Resu
             .parent()
             .unwrap()
             .join("winhider_payload.dll");
-        
-        if !master_dll_path.exists() {
-             if let Ok(cwd) = std::env::current_dir() {
-                 master_dll_path = cwd.join("target").join("release").join("winhider_payload.dll");
-             }
-        }
-        if !master_dll_path.exists() { return Err("Base DLL not found".to_string()); }
 
-        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+        if !master_dll_path.exists() {
+            if let Ok(cwd) = std::env::current_dir() {
+                master_dll_path = cwd
+                    .join("target")
+                    .join("release")
+                    .join("winhider_payload.dll");
+            }
+        }
+        if !master_dll_path.exists() {
+            return Err("Base DLL not found".to_string());
+        }
+
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
         let keyword = match action {
             InjectionAction::HideCapture => "hidecapture",
             InjectionAction::ShowCapture => "showcapture",
@@ -1135,30 +1377,69 @@ fn inject_payload(target_pid: u32, action: InjectionAction) -> std::result::Resu
 
         let path_str = target_dll_path.to_str().unwrap();
         let mut path_bytes: Vec<u8> = path_str.bytes().collect();
-        path_bytes.push(0); 
+        path_bytes.push(0);
 
         let process = OpenProcess(
-            PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ,
+            PROCESS_CREATE_THREAD
+                | PROCESS_QUERY_INFORMATION
+                | PROCESS_VM_OPERATION
+                | PROCESS_VM_WRITE
+                | PROCESS_VM_READ,
             false,
-            target_pid
-        ).map_err(|e| format!("OpenProcess failed: {}", e))?;
+            target_pid,
+        )
+        .map_err(|e| format!("OpenProcess failed: {}", e))?;
 
-        let remote_mem = VirtualAllocEx(process, None, path_bytes.len(), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-        if remote_mem.is_null() { let _ = CloseHandle(process); return Err("Alloc fail".to_string()); }
+        let remote_mem = VirtualAllocEx(
+            process,
+            None,
+            path_bytes.len(),
+            MEM_COMMIT | MEM_RESERVE,
+            PAGE_READWRITE,
+        );
+        if remote_mem.is_null() {
+            let _ = CloseHandle(process);
+            return Err("Alloc fail".to_string());
+        }
 
         let mut written = 0;
-        let write_res = WriteProcessMemory(process, remote_mem, path_bytes.as_ptr() as *const c_void, path_bytes.len(), Some(&mut written));
-        if write_res.is_err() { let _ = VirtualFreeEx(process, remote_mem, 0, MEM_RELEASE); let _ = CloseHandle(process); return Err("Write fail".to_string()); }
+        let write_res = WriteProcessMemory(
+            process,
+            remote_mem,
+            path_bytes.as_ptr() as *const c_void,
+            path_bytes.len(),
+            Some(&mut written),
+        );
+        if write_res.is_err() {
+            let _ = VirtualFreeEx(process, remote_mem, 0, MEM_RELEASE);
+            let _ = CloseHandle(process);
+            return Err("Write fail".to_string());
+        }
 
         let kernel32 = GetModuleHandleA(s!("kernel32.dll")).unwrap();
         let load_lib = GetProcAddress(kernel32, s!("LoadLibraryA"));
-        
-        if load_lib.is_none() { let _ = VirtualFreeEx(process, remote_mem, 0, MEM_RELEASE); let _ = CloseHandle(process); return Err("No LoadLibraryA".to_string()); }
 
-        let start_routine = std::mem::transmute::<unsafe extern "system" fn() -> isize, unsafe extern "system" fn(*mut c_void) -> u32>(std::mem::transmute(load_lib));
+        if load_lib.is_none() {
+            let _ = VirtualFreeEx(process, remote_mem, 0, MEM_RELEASE);
+            let _ = CloseHandle(process);
+            return Err("No LoadLibraryA".to_string());
+        }
 
-        let thread = CreateRemoteThread(process, None, 0, Some(start_routine), Some(remote_mem), 0, None)
-            .map_err(|e| format!("Thread fail: {}", e))?;
+        let start_routine = std::mem::transmute::<
+            unsafe extern "system" fn() -> isize,
+            unsafe extern "system" fn(*mut c_void) -> u32,
+        >(std::mem::transmute(load_lib));
+
+        let thread = CreateRemoteThread(
+            process,
+            None,
+            0,
+            Some(start_routine),
+            Some(remote_mem),
+            0,
+            None,
+        )
+        .map_err(|e| format!("Thread fail: {}", e))?;
 
         WaitForSingleObject(thread, 2000);
         let _ = VirtualFreeEx(process, remote_mem, 0, MEM_RELEASE);
@@ -1173,12 +1454,24 @@ fn kill_process_by_name(name: &str) {
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).ok();
         if let Some(snapshot) = snapshot {
-            let mut entry = PROCESSENTRY32 { dwSize: std::mem::size_of::<PROCESSENTRY32>() as u32, ..Default::default() };
+            let mut entry = PROCESSENTRY32 {
+                dwSize: std::mem::size_of::<PROCESSENTRY32>() as u32,
+                ..Default::default()
+            };
             if Process32First(snapshot, &mut entry).is_ok() {
                 loop {
                     let exe_file = &entry.szExeFile;
-                    let len = exe_file.iter().position(|&c| c == 0).unwrap_or(exe_file.len());
-                    let process_name = String::from_utf8_lossy(&exe_file[0..len].iter().map(|&c| c as u8).collect::<Vec<u8>>()).into_owned();
+                    let len = exe_file
+                        .iter()
+                        .position(|&c| c == 0)
+                        .unwrap_or(exe_file.len());
+                    let process_name = String::from_utf8_lossy(
+                        &exe_file[0..len]
+                            .iter()
+                            .map(|&c| c as u8)
+                            .collect::<Vec<u8>>(),
+                    )
+                    .into_owned();
 
                     if process_name.eq_ignore_ascii_case(name) {
                         if let Ok(h) = OpenProcess(PROCESS_TERMINATE, false, entry.th32ProcessID) {
@@ -1186,7 +1479,9 @@ fn kill_process_by_name(name: &str) {
                             let _ = CloseHandle(h);
                         }
                     }
-                    if Process32Next(snapshot, &mut entry).is_err() { break; }
+                    if Process32Next(snapshot, &mut entry).is_err() {
+                        break;
+                    }
                 }
             }
             let _ = CloseHandle(snapshot);
@@ -1214,22 +1509,21 @@ fn clean_temp_files() {
 }
 
 fn launch_cli() -> Result<(), String> {
-    let exe_path = std::env::current_exe()
-        .map_err(|e| format!("Failed to get current exe path: {}", e))?;
-    
-    let exe_dir = exe_path.parent()
-        .ok_or("Failed to get exe directory")?;
-    
+    let exe_path =
+        std::env::current_exe().map_err(|e| format!("Failed to get current exe path: {}", e))?;
+
+    let exe_dir = exe_path.parent().ok_or("Failed to get exe directory")?;
+
     let cli_path = exe_dir.join("winhider-cli.exe");
-    
+
     if !cli_path.exists() {
         return Err("winhider-cli.exe not found in the same directory".to_string());
     }
-    
+
     std::process::Command::new(&cli_path)
         .spawn()
         .map_err(|e| format!("Failed to launch CLI: {}", e))?;
-    
+
     Ok(())
 }
 
@@ -1242,7 +1536,7 @@ fn truncate_middle(text: &str, max_len: usize) -> String {
     let chars_to_keep = max_len.saturating_sub(3);
     let head_len = (chars_to_keep as f32 / 2.0).ceil() as usize;
     let tail_len = (chars_to_keep as f32 / 2.0).floor() as usize;
-    
+
     let head: String = text.chars().take(head_len).collect();
     let tail: String = text.chars().skip(char_count - tail_len).collect();
     format!("{}{}{}", head, separator, tail)
@@ -1261,13 +1555,13 @@ pub fn load_app_icon() -> (egui::IconData, egui::ColorImage) {
     match image_result {
         Ok(image) => {
             let rgba = image.to_rgba8().into_raw();
-            
+
             let icon_data = egui::IconData {
                 rgba: rgba.clone(),
                 width: image.width(),
                 height: image.height(),
             };
-            
+
             let color_image = egui::ColorImage::from_rgba_unmultiplied(
                 [image.width() as _, image.height() as _],
                 &rgba,
@@ -1277,24 +1571,22 @@ pub fn load_app_icon() -> (egui::IconData, egui::ColorImage) {
         }
         Err(e) => {
             eprintln!("⚠ Failed to decode embedded icon: {}. Using fallback.", e);
-            
+
             // --- FALLBACK: Generate a 32x32 Blue Square ---
             let width = 32;
             let height = 32;
             // RGBA: Red=0, Green=0, Blue=255, Alpha=255
             let rgba = vec![0, 0, 255, 255].repeat((width * height) as usize);
-            
+
             let icon_data = egui::IconData {
                 rgba: rgba.clone(),
                 width,
                 height,
             };
-            
-            let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                [width as _, height as _],
-                &rgba,
-            );
-            
+
+            let color_image =
+                egui::ColorImage::from_rgba_unmultiplied([width as _, height as _], &rgba);
+
             (icon_data, color_image)
         }
     }
@@ -1302,13 +1594,19 @@ pub fn load_app_icon() -> (egui::IconData, egui::ColorImage) {
 
 fn get_pid(hwnd: HWND) -> u32 {
     let mut pid = 0;
-    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)); }
+    unsafe {
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+    }
     pid
 }
 
 fn set_capture_self(hwnd: HWND, hide: bool) -> std::result::Result<(), String> {
     unsafe {
-        let affinity = if hide { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE };
+        let affinity = if hide {
+            WDA_EXCLUDEFROMCAPTURE
+        } else {
+            WDA_NONE
+        };
         SetWindowDisplayAffinity(hwnd, affinity).map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -1317,10 +1615,24 @@ fn set_capture_self(hwnd: HWND, hide: bool) -> std::result::Result<(), String> {
 fn set_taskbar_visibility_external(hwnd: HWND, hide: bool) -> std::result::Result<(), String> {
     unsafe {
         let mut style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
-        if hide { style &= !WS_EX_APPWINDOW.0; style |= WS_EX_TOOLWINDOW.0; } 
-        else { style &= !WS_EX_TOOLWINDOW.0; style |= WS_EX_APPWINDOW.0; }
+        if hide {
+            style &= !WS_EX_APPWINDOW.0;
+            style |= WS_EX_TOOLWINDOW.0;
+        } else {
+            style &= !WS_EX_TOOLWINDOW.0;
+            style |= WS_EX_APPWINDOW.0;
+        }
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style as isize);
-        SetWindowPos(hwnd, HWND(0), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED).map_err(|e| e.to_string())?;
+        SetWindowPos(
+            hwnd,
+            HWND(0),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED,
+        )
+        .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -1336,16 +1648,22 @@ fn get_eframe_hwnd(frame: &eframe::Frame) -> HWND {
 pub fn enumerate_windows(ctx: &egui::Context) -> Vec<AppWindow> {
     let mut list = Vec::new();
     let mut params = (list, ctx.clone());
-    
+
     unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-        if !IsWindowVisible(hwnd).as_bool() { return BOOL(1); }
-        
+        if !IsWindowVisible(hwnd).as_bool() {
+            return BOOL(1);
+        }
+
         let mut title_buf = [0u16; 256];
         let len = GetWindowTextW(hwnd, &mut title_buf);
-        if len == 0 { return BOOL(1); }
-        
+        if len == 0 {
+            return BOOL(1);
+        }
+
         let title = String::from_utf16_lossy(&title_buf[..len as usize]);
-        if crate::IGNORED_WINDOWS.contains(&title.as_str()) { return BOOL(1); }
+        if crate::IGNORED_WINDOWS.contains(&title.as_str()) {
+            return BOOL(1);
+        }
 
         // --- NEW: Get PID ---
         let mut pid = 0;
@@ -1353,18 +1671,20 @@ pub fn enumerate_windows(ctx: &egui::Context) -> Vec<AppWindow> {
         // --------------------
 
         let (list, ctx) = &mut *(lparam.0 as *mut (Vec<AppWindow>, egui::Context));
-        list.push(AppWindow { 
-            hwnd, 
+        list.push(AppWindow {
+            hwnd,
             pid, // Store it
-            title, 
-            is_taskbar_hidden: false, 
-            is_capture_hidden: false, 
-            icon_texture: get_window_icon(hwnd, ctx) 
+            title,
+            is_taskbar_hidden: false,
+            is_capture_hidden: false,
+            icon_texture: get_window_icon(hwnd, ctx),
         });
         BOOL(1)
     }
 
-    unsafe { EnumWindows(Some(enum_proc), LPARAM(&mut params as *mut _ as isize)); }
+    unsafe {
+        EnumWindows(Some(enum_proc), LPARAM(&mut params as *mut _ as isize));
+    }
     params.0
 }
 
@@ -1403,13 +1723,15 @@ fn load_settings() -> AppSettings {
     let config_dir = get_config_dir();
     let file_path = config_dir.join("settings.json");
     match std::fs::read_to_string(file_path) {
-        Ok(content) => serde_json::from_str(&content).unwrap_or_else(|_| AppSettings { 
+        Ok(content) => serde_json::from_str(&content).unwrap_or_else(|_| AppSettings {
             enable_auto_update: true,
             preview_quality: 2,
+            language: Language::default(),
         }),
-        Err(_) => AppSettings { 
+        Err(_) => AppSettings {
             enable_auto_update: true,
             preview_quality: 2,
+            language: Language::default(),
         },
     }
 }
@@ -1417,14 +1739,19 @@ fn load_settings() -> AppSettings {
 fn save_settings(settings: &AppSettings) -> std::io::Result<()> {
     let config_dir = get_config_dir();
     let file_path = config_dir.join("settings.json");
-    let content = serde_json::to_string_pretty(settings).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let content = serde_json::to_string_pretty(settings)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     std::fs::write(file_path, content)
 }
 
 impl WinHiderApp {
     fn should_auto_hide(&self, window_title: &str) -> bool {
         for app_name in &self.auto_hide_list {
-            if !app_name.is_empty() && window_title.to_lowercase().contains(&app_name.to_lowercase()) {
+            if !app_name.is_empty()
+                && window_title
+                    .to_lowercase()
+                    .contains(&app_name.to_lowercase())
+            {
                 return true;
             }
         }
@@ -1433,7 +1760,7 @@ impl WinHiderApp {
 }
 
 fn main() -> eframe::Result<()> {
-// Load Icon data for Window Titlebar (Reuse logic via utils)
+    // Load Icon data for Window Titlebar (Reuse logic via utils)
     // This now safely handles the ICO file without crashing
     let (icon_data, _) = load_app_icon();
 
